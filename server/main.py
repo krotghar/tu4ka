@@ -20,6 +20,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+import aqi
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("TU4KA_DB", "/var/lib/tu4ka/tu4ka.db")
 PUSH_USER = os.environ.get("TU4KA_PUSH_USER", "")
@@ -172,18 +174,41 @@ async def push(request: Request):
     return {"ok": True, "ts": ts}
 
 
+def _nowcast_aqi(conn, now):
+    """AQI по методу EPA NowCast: почасовые средние PM за 12 ч, взвешенно."""
+    cur_hour = now // 3600
+    rows = conn.execute(
+        "SELECT (ts/3600) AS h, avg(pm25) AS pm25, avg(pm10) AS pm10"
+        " FROM measurements WHERE ts >= ? GROUP BY h",
+        (now - 12 * 3600,),
+    ).fetchall()
+    pm25_by_ago, pm10_by_ago = {}, {}
+    for row in rows:
+        ago = cur_hour - row["h"]
+        if row["pm25"] is not None:
+            pm25_by_ago[ago] = row["pm25"]
+        if row["pm10"] is not None:
+            pm10_by_ago[ago] = row["pm10"]
+    result = aqi.compute(aqi.nowcast(pm25_by_ago), aqi.nowcast(pm10_by_ago))
+    result["method"] = "nowcast_12h"
+    return result
+
+
 @app.get("/api/v1/current")
 def current():
-    """Последнее измерение и его возраст в секундах."""
+    """Последнее измерение, его возраст и текущий AQI (US EPA, NowCast)."""
+    now = int(time.time())
     with closing(db()) as conn:
         r = conn.execute(
             "SELECT ts, sensor_id, pm10, pm25, temperature, humidity,"
             " pressure, signal FROM measurements ORDER BY ts DESC, id DESC LIMIT 1"
         ).fetchone()
-    if r is None:
-        return {"ts": None}
+        if r is None:
+            return {"ts": None}
+        aqi_info = _nowcast_aqi(conn, now)
     d = dict(r)
-    d["age_s"] = max(0, int(time.time()) - d["ts"])
+    d["age_s"] = max(0, now - d["ts"])
+    d["aqi"] = aqi_info
     return d
 
 
@@ -203,7 +228,12 @@ def history(period: str = "day"):
             " count(*) AS n FROM measurements WHERE ts >= ? GROUP BY t ORDER BY t",
             (bucket, bucket, since),
         ).fetchall()
-    return {"period": period, "bucket_s": bucket, "points": [dict(r) for r in rows]}
+    points = []
+    for r in rows:
+        p = dict(r)
+        p["aqi"] = aqi.compute(p["pm25"], p["pm10"])["aqi"]  # мгновенный AQI корзины
+        points.append(p)
+    return {"period": period, "bucket_s": bucket, "points": points}
 
 
 @app.get("/healthz", include_in_schema=False)

@@ -66,6 +66,28 @@ h1 { font-size: 22px; margin: 0; }
 .tile .extra { font-size: 12.5px; color: var(--muted); margin-top: 2px; min-height: 1.2em; }
 .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); margin-top: 6px; }
 .chip .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+/* [hidden] по умолчанию перебивается author-правилом display выше — вернём скрытие */
+.chip[hidden], .trend[hidden] { display: none; }
+
+/* Тренд показателя за выбранный период */
+.trend { font-size: 12.5px; margin-top: 5px; display: flex; align-items: baseline;
+  gap: 5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.trend .arw { font-size: 12px; }
+.trend .tp { color: var(--muted); }
+.trend.good { color: var(--st-good); }
+.trend.bad { color: var(--st-critical); }
+
+/* Плитка AQI (US EPA) */
+.aqi-hero { grid-column: span 2; }
+.aqi-main { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.aqi-num { font-size: 44px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.aqi-badge { font-size: 13px; font-weight: 650; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+.aqi-scale { position: relative; height: 8px; border-radius: 4px; margin: 12px 0 6px;
+  background: linear-gradient(90deg, #00e400 0 10%, #ffff00 10% 20%, #ff7e00 20% 30%,
+    #ff0000 30% 40%, #8f3f97 40% 60%, #7e0023 60% 100%); }
+.aqi-marker { position: absolute; top: -3px; width: 3px; height: 14px; border-radius: 2px;
+  background: var(--ink); box-shadow: 0 0 0 2px var(--surface); transform: translateX(-50%); }
+@media (max-width: 380px) { .aqi-hero { grid-column: auto; } }
 
 .controls { display: flex; gap: 8px; align-items: center; margin: 4px 0 14px; }
 .controls .label { font-size: 13px; color: var(--ink-2); margin-right: 4px; }
@@ -114,30 +136,43 @@ footer a { color: var(--ink-2); }
   </header>
 
   <div class="tiles">
+    <div class="tile aqi-hero">
+      <div class="name">Индекс качества воздуха · AQI (US EPA)</div>
+      <div class="aqi-main">
+        <span class="aqi-num" id="v-aqi">—</span>
+        <span class="aqi-badge" id="aqi-badge" hidden></span>
+      </div>
+      <div class="trend" id="tr-aqi" hidden></div>
+      <div class="aqi-scale"><div class="aqi-marker" id="aqi-marker" hidden></div></div>
+      <div class="extra" id="aqi-note"></div>
+    </div>
     <div class="tile">
       <div class="name">PM2.5</div>
       <div class="value"><span id="v-pm25">—</span> <span class="unit">мкг/м³</span></div>
       <div class="chip" id="chip-pm25" hidden><span class="dot"></span><span class="txt"></span></div>
+      <div class="trend" id="tr-pm25" hidden></div>
     </div>
     <div class="tile">
       <div class="name">PM10</div>
       <div class="value"><span id="v-pm10">—</span> <span class="unit">мкг/м³</span></div>
       <div class="chip" id="chip-pm10" hidden><span class="dot"></span><span class="txt"></span></div>
+      <div class="trend" id="tr-pm10" hidden></div>
     </div>
     <div class="tile">
       <div class="name">Температура</div>
       <div class="value"><span id="v-temp">—</span> <span class="unit">°C</span></div>
-      <div class="extra"></div>
+      <div class="trend" id="tr-temp" hidden></div>
     </div>
     <div class="tile">
       <div class="name">Влажность</div>
       <div class="value"><span id="v-hum">—</span> <span class="unit">%</span></div>
-      <div class="extra"></div>
+      <div class="trend" id="tr-hum" hidden></div>
     </div>
     <div class="tile">
       <div class="name">Давление</div>
       <div class="value"><span id="v-press">—</span> <span class="unit">гПа</span></div>
       <div class="extra" id="v-press-mm"></div>
+      <div class="trend" id="tr-press" hidden></div>
     </div>
   </div>
 
@@ -194,6 +229,19 @@ const BANDS = {
          [100, "Плохо", "--st-serious"], [Infinity, "Очень плохо", "--st-critical"]],
 };
 
+/* Категории US EPA AQI: официальные цвета AirNow + русские подписи.
+   Цвет badge — фон, ink — читаемый текст поверх него. */
+const AQI_CATS = {
+  good:           { label: "Хорошо",                    color: "#00e400", ink: "#0b3d0b" },
+  moderate:       { label: "Умеренно",                  color: "#ffff00", ink: "#4d3b00" },
+  usg:            { label: "Вредно для чувствительных", color: "#ff7e00", ink: "#3d1d00" },
+  unhealthy:      { label: "Вредно",                    color: "#ff0000", ink: "#ffffff" },
+  very_unhealthy: { label: "Очень вредно",              color: "#8f3f97", ink: "#ffffff" },
+  hazardous:      { label: "Опасно",                    color: "#7e0023", ink: "#ffffff" },
+};
+const POLLUTANT_LABEL = { pm25: "PM2.5", pm10: "PM10" };
+const PERIOD_WORD = { day: "за сутки", week: "за неделю", month: "за месяц" };
+
 let period = "day";
 let charts = {};          // id -> Chart
 let lastHistory = null;   // последний ответ /history
@@ -221,6 +269,67 @@ function setChip(id, kind, v) {
   chip.hidden = false;
   chip.querySelector(".dot").style.background = b.color;
   chip.querySelector(".txt").textContent = b.label;
+}
+
+function renderAqi(info) {
+  const numEl = $("#v-aqi"), badge = $("#aqi-badge"),
+        marker = $("#aqi-marker"), note = $("#aqi-note");
+  const cat = info && info.category && AQI_CATS[info.category];
+  if (!info || info.aqi == null || !cat) {
+    numEl.textContent = "—";
+    badge.hidden = true;
+    marker.hidden = true;
+    note.textContent = "недостаточно данных для расчёта";
+    return;
+  }
+  numEl.textContent = info.aqi;
+  badge.hidden = false;
+  badge.textContent = cat.label;
+  badge.style.background = cat.color;
+  badge.style.color = cat.ink;
+  marker.hidden = false;
+  marker.style.left = Math.min(100, info.aqi / 5) + "%";  // 0..500 -> 0..100%
+  const dom = POLLUTANT_LABEL[info.dominant];
+  note.textContent = (dom ? `определяет ${dom} · ` : "") + "метод NowCast (EPA, 12 ч)";
+}
+
+/* Средняя разница между началом и концом периода (сглажена по краям). */
+function trendDelta(pts, key) {
+  const vals = pts.map(p => p[key]).filter(v => v != null);
+  if (vals.length < 2) return null;
+  const k = Math.max(1, Math.min(3, Math.floor(vals.length / 2)));
+  const avg = a => a.reduce((s, x) => s + x, 0) / a.length;
+  return avg(vals.slice(-k)) - avg(vals.slice(0, k));
+}
+
+function setTrend(id, delta, { digits = 1, unit = "", eps = 0.5, worseUp = false } = {}) {
+  const el = $(id);
+  if (delta == null) { el.hidden = true; return; }
+  el.hidden = false;
+  let arrow, cls = "";
+  if (Math.abs(delta) < eps) {
+    arrow = "→";
+  } else if (delta > 0) {
+    arrow = "▲"; cls = worseUp ? "bad" : "";
+  } else {
+    arrow = "▼"; cls = worseUp ? "good" : "";
+  }
+  el.className = "trend " + cls;
+  const sign = delta > 0 ? "+" : "−";
+  const num = Math.abs(delta) < eps ? "без изменений"
+    : `${sign}${fmt(Math.abs(delta), digits)}${unit}`;
+  const pw = PERIOD_WORD[(lastHistory && lastHistory.period) || period];
+  el.innerHTML = `<span class="arw">${arrow}</span> ${num} <span class="tp">${pw}</span>`;
+}
+
+function renderTrends() {
+  const pts = (lastHistory && lastHistory.points) || [];
+  setTrend("#tr-aqi", trendDelta(pts, "aqi"), { digits: 0, eps: 2, worseUp: true });
+  setTrend("#tr-pm25", trendDelta(pts, "pm25"), { unit: "", eps: 0.5, worseUp: true });
+  setTrend("#tr-pm10", trendDelta(pts, "pm10"), { unit: "", eps: 0.5, worseUp: true });
+  setTrend("#tr-temp", trendDelta(pts, "temperature"), { unit: "°", eps: 0.3 });
+  setTrend("#tr-hum", trendDelta(pts, "humidity"), { digits: 0, unit: "%", eps: 1 });
+  setTrend("#tr-press", trendDelta(pts, "pressure"), { digits: 0, unit: "", eps: 0.5 });
 }
 
 function fmtAge(s) {
@@ -256,6 +365,7 @@ async function loadCurrent() {
       `${Math.round(d.pressure * 0.750062)} мм рт. ст.`;
     setChip("#chip-pm25", "pm25", d.pm25);
     setChip("#chip-pm10", "pm10", d.pm10);
+    renderAqi(d.aqi);
     if (d.sensor_id) $("#sensor-label").textContent = `датчик airRohr-${d.sensor_id}`;
   } catch (e) { /* сеть мигнула — оставляем прежние значения */ }
   renderFreshness();
@@ -365,6 +475,7 @@ async function loadHistory() {
   lastHistory = resp;
   buildCharts();
   buildTable();
+  renderTrends();
 }
 
 for (const btn of document.querySelectorAll(".seg")) {
