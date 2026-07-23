@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Тучка — качество воздуха</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>☁️</text></svg>">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11,11,11,0.10);
+  --series-1: #2a78d6;  /* PM2.5 */
+  --series-2: #eb6834;  /* PM10 */
+  --st-good: #0ca30c;
+  --st-warn: #fab219;
+  --st-serious: #ec835a;
+  --st-critical: #d03b3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255,255,255,0.10);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.4;
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding: 20px 16px 48px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+h1 { font-size: 22px; margin: 0; }
+.sub { color: var(--ink-2); font-size: 13px; }
+#freshness { font-size: 13px; color: var(--ink-2); margin-left: auto; }
+#freshness.stale { color: var(--st-critical); font-weight: 600; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.tile .name { font-size: 13px; color: var(--ink-2); margin-bottom: 6px; }
+.tile .value { font-size: 30px; font-weight: 650; }
+.tile .unit { font-size: 14px; font-weight: 400; color: var(--ink-2); }
+.tile .extra { font-size: 12.5px; color: var(--muted); margin-top: 2px; min-height: 1.2em; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); margin-top: 6px; }
+.chip .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+
+.controls { display: flex; gap: 8px; align-items: center; margin: 4px 0 14px; }
+.controls .label { font-size: 13px; color: var(--ink-2); margin-right: 4px; }
+.seg {
+  background: var(--surface);
+  color: var(--ink-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13.5px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.seg[aria-pressed="true"] { color: var(--ink); font-weight: 650; border-color: var(--axis); }
+.seg:hover { color: var(--ink); }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px 10px;
+  margin-bottom: 14px;
+}
+.card h2 { font-size: 14.5px; margin: 0 0 10px; font-weight: 650; }
+.card h2 .u { color: var(--muted); font-weight: 400; }
+.chart-box { position: relative; height: 250px; }
+.empty-note { color: var(--muted); font-size: 14px; text-align: center; padding: 40px 0; }
+
+details.table-view { margin-top: 6px; }
+details.table-view summary { cursor: pointer; font-size: 13.5px; color: var(--ink-2); padding: 6px 2px; }
+.table-scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 5px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--ink-2); font-weight: 600; }
+footer { color: var(--muted); font-size: 12.5px; margin-top: 20px; }
+footer a { color: var(--ink-2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Тучка</h1>
+    <span class="sub" id="sensor-label">датчик воздуха</span>
+    <span id="freshness">загрузка…</span>
+  </header>
+
+  <div class="tiles">
+    <div class="tile">
+      <div class="name">PM2.5</div>
+      <div class="value"><span id="v-pm25">—</span> <span class="unit">мкг/м³</span></div>
+      <div class="chip" id="chip-pm25" hidden><span class="dot"></span><span class="txt"></span></div>
+    </div>
+    <div class="tile">
+      <div class="name">PM10</div>
+      <div class="value"><span id="v-pm10">—</span> <span class="unit">мкг/м³</span></div>
+      <div class="chip" id="chip-pm10" hidden><span class="dot"></span><span class="txt"></span></div>
+    </div>
+    <div class="tile">
+      <div class="name">Температура</div>
+      <div class="value"><span id="v-temp">—</span> <span class="unit">°C</span></div>
+      <div class="extra"></div>
+    </div>
+    <div class="tile">
+      <div class="name">Влажность</div>
+      <div class="value"><span id="v-hum">—</span> <span class="unit">%</span></div>
+      <div class="extra"></div>
+    </div>
+    <div class="tile">
+      <div class="name">Давление</div>
+      <div class="value"><span id="v-press">—</span> <span class="unit">гПа</span></div>
+      <div class="extra" id="v-press-mm"></div>
+    </div>
+  </div>
+
+  <div class="controls" role="group" aria-label="Период">
+    <span class="label">Период:</span>
+    <button class="seg" data-period="day" aria-pressed="true">Сутки</button>
+    <button class="seg" data-period="week" aria-pressed="false">Неделя</button>
+    <button class="seg" data-period="month" aria-pressed="false">Месяц</button>
+  </div>
+
+  <div class="card">
+    <h2>Пыль PM2.5 / PM10 <span class="u">· мкг/м³</span></h2>
+    <div class="chart-box"><canvas id="ch-pm"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Температура <span class="u">· °C</span></h2>
+    <div class="chart-box"><canvas id="ch-temp"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Влажность <span class="u">· %</span></h2>
+    <div class="chart-box"><canvas id="ch-hum"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Давление <span class="u">· гПа</span></h2>
+    <div class="chart-box"><canvas id="ch-press"></canvas></div>
+  </div>
+
+  <details class="table-view">
+    <summary>Таблица данных</summary>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Время</th><th>PM2.5</th><th>PM10</th><th>°C</th><th>Влажн., %</th><th>гПа</th></tr></thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+  </details>
+
+  <footer>
+    Датчик: SDS011 + BME280 (прошивка airRohr) · <a href="/docs">API</a>
+  </footer>
+</div>
+
+<script src="/static/chart.umd.js"></script>
+<script>
+"use strict";
+
+const $ = s => document.querySelector(s);
+
+/* Пороги качества воздуха, мкг/м³ (на основе WHO-2021 / CAQI) */
+const BANDS = {
+  pm25: [[15, "Хорошо", "--st-good"], [25, "Умеренно", "--st-warn"],
+         [50, "Плохо", "--st-serious"], [Infinity, "Очень плохо", "--st-critical"]],
+  pm10: [[30, "Хорошо", "--st-good"], [50, "Умеренно", "--st-warn"],
+         [100, "Плохо", "--st-serious"], [Infinity, "Очень плохо", "--st-critical"]],
+};
+
+let period = "day";
+let charts = {};          // id -> Chart
+let lastHistory = null;   // последний ответ /history
+let lastCurrentTs = null; // ts последнего измерения
+let lastAgeS = null;      // age_s из последнего ответа /current
+let lastAgeAt = 0;        // Date.now() в момент этого ответа
+let historyGen = 0;       // отсекает устаревшие ответы /history
+let historyRetry = null;
+
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const fmt = (v, d = 1) => (v == null ? "—" : Number(v).toFixed(d).replace(".", ","));
+
+function band(kind, v) {
+  if (v == null) return null;
+  for (const [limit, label, colorVar] of BANDS[kind]) {
+    if (v < limit) return { label, color: css(colorVar) };
+  }
+  return null;
+}
+
+function setChip(id, kind, v) {
+  const chip = $(id);
+  const b = band(kind, v);
+  if (!b) { chip.hidden = true; return; }
+  chip.hidden = false;
+  chip.querySelector(".dot").style.background = b.color;
+  chip.querySelector(".txt").textContent = b.label;
+}
+
+function fmtAge(s) {
+  if (s < 90) return `${s} с назад`;
+  if (s < 5400) return `${Math.round(s / 60)} мин назад`;
+  return `${(s / 3600).toFixed(1).replace(".", ",")} ч назад`;
+}
+
+function renderFreshness() {
+  const el = $("#freshness");
+  if (lastAgeS == null) { el.textContent = "данных пока нет"; el.classList.add("stale"); return; }
+  // возраст считаем от серверного age_s — часы клиента могут врать
+  const age = Math.max(0, Math.round(lastAgeS + (Date.now() - lastAgeAt) / 1000));
+  const stale = age > 300;
+  el.classList.toggle("stale", stale);
+  el.textContent = (stale ? "⚠ данные устарели — " : "обновлено ") + fmtAge(age);
+}
+
+async function loadCurrent() {
+  try {
+    const r = await fetch("/api/v1/current");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    lastCurrentTs = d.ts;
+    lastAgeS = d.ts == null ? null : d.age_s;
+    lastAgeAt = Date.now();
+    $("#v-pm25").textContent = fmt(d.pm25);
+    $("#v-pm10").textContent = fmt(d.pm10);
+    $("#v-temp").textContent = fmt(d.temperature);
+    $("#v-hum").textContent = fmt(d.humidity, 0);
+    $("#v-press").textContent = fmt(d.pressure, 0);
+    $("#v-press-mm").textContent = d.pressure == null ? "" :
+      `${Math.round(d.pressure * 0.750062)} мм рт. ст.`;
+    setChip("#chip-pm25", "pm25", d.pm25);
+    setChip("#chip-pm10", "pm10", d.pm10);
+    if (d.sensor_id) $("#sensor-label").textContent = `датчик airRohr-${d.sensor_id}`;
+  } catch (e) { /* сеть мигнула — оставляем прежние значения */ }
+  renderFreshness();
+}
+
+function timeLabel(tSec) {
+  const d = new Date(tSec * 1000);
+  const p = (lastHistory && lastHistory.period) || period;
+  if (p === "day")
+    return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function baseOptions() {
+  const gridColor = css("--grid"), tickColor = css("--muted"), axisColor = css("--axis");
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: css("--surface"),
+        titleColor: css("--ink"),
+        bodyColor: css("--ink-2"),
+        borderColor: css("--border"),
+        borderWidth: 1,
+      },
+    },
+    scales: {
+      x: {
+        grid: { color: gridColor, drawTicks: false },
+        border: { color: axisColor },
+        ticks: { color: tickColor, maxTicksLimit: 8, maxRotation: 0, autoSkip: true },
+      },
+      y: {
+        grid: { color: gridColor, drawTicks: false },
+        border: { display: false },
+        ticks: { color: tickColor, maxTicksLimit: 6 },
+      },
+    },
+  };
+}
+
+function lineDataset(label, data, colorVar) {
+  return {
+    label,
+    data,
+    borderColor: css(colorVar),
+    backgroundColor: css(colorVar),
+    borderWidth: 2,
+    pointRadius: 0,
+    pointHoverRadius: 4,
+    pointHitRadius: 10,
+    tension: 0.25,
+    spanGaps: true,
+  };
+}
+
+function buildCharts() {
+  for (const c of Object.values(charts)) c.destroy();
+  charts = {};
+  const pts = (lastHistory && lastHistory.points) || [];
+  const labels = pts.map(p => timeLabel(p.t));
+
+  const mk = (id, datasets, extraOpts = {}) => {
+    const opts = baseOptions();
+    Object.assign(opts.scales.y, extraOpts.y || {});
+    if (extraOpts.legend) opts.plugins.legend = {
+      display: true, labels: { color: css("--ink-2"), boxWidth: 18, boxHeight: 3 },
+    };
+    charts[id] = new Chart($(id), { type: "line", data: { labels, datasets }, options: opts });
+  };
+
+  mk("#ch-pm", [
+    lineDataset("PM2.5", pts.map(p => p.pm25), "--series-1"),
+    lineDataset("PM10", pts.map(p => p.pm10), "--series-2"),
+  ], { legend: true, y: { beginAtZero: true } });
+  mk("#ch-temp", [lineDataset("Температура", pts.map(p => p.temperature), "--series-1")]);
+  mk("#ch-hum", [lineDataset("Влажность", pts.map(p => p.humidity), "--series-1")],
+     { y: { suggestedMin: 0, suggestedMax: 100 } });
+  mk("#ch-press", [lineDataset("Давление", pts.map(p => p.pressure), "--series-1")]);
+}
+
+function buildTable() {
+  const pts = (lastHistory && lastHistory.points) || [];
+  $("#table-body").innerHTML = pts.slice().reverse().map(p =>
+    `<tr><td>${timeLabel(p.t)}</td><td>${fmt(p.pm25)}</td><td>${fmt(p.pm10)}</td>` +
+    `<td>${fmt(p.temperature)}</td><td>${fmt(p.humidity, 0)}</td><td>${fmt(p.pressure, 0)}</td></tr>`
+  ).join("");
+}
+
+async function loadHistory() {
+  const gen = ++historyGen;
+  let resp;
+  try {
+    const r = await fetch(`/api/v1/history?period=${period}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    resp = await r.json();
+  } catch (e) {
+    // сеть мигнула — повторим через 15 с, не дожидаясь 5-минутного интервала
+    if (!historyRetry) historyRetry = setTimeout(() => { historyRetry = null; loadHistory(); }, 15_000);
+    return;
+  }
+  if (gen !== historyGen) return; // пришёл ответ на устаревший запрос
+  lastHistory = resp;
+  buildCharts();
+  buildTable();
+}
+
+for (const btn of document.querySelectorAll(".seg")) {
+  btn.addEventListener("click", () => {
+    period = btn.dataset.period;
+    for (const b of document.querySelectorAll(".seg"))
+      b.setAttribute("aria-pressed", String(b === btn));
+    loadHistory();
+  });
+}
+
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => buildCharts());
+
+loadCurrent();
+loadHistory();
+setInterval(loadCurrent, 60_000);
+setInterval(loadHistory, 300_000);
+setInterval(renderFreshness, 10_000);
+</script>
+</body>
+</html>

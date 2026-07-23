@@ -1,0 +1,23 @@
+[Unit]
+Description=tu4ka air quality service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=tu4ka
+Group=tu4ka
+EnvironmentFile=/etc/tu4ka/env
+WorkingDirectory=/opt/tu4ka/app
+ExecStart=/opt/tu4ka/venv/bin/uvicorn main:app --host 0.0.0.0 --port 80 --workers 1
+Restart=always
+RestartSec=3
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tu4ka
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
