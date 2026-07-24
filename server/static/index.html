@@ -18,6 +18,9 @@
   --border: rgba(11,11,11,0.10);
   --series-1: #2a78d6;  /* PM2.5 */
   --series-2: #eb6834;  /* PM10 */
+  /* AQI — нейтральный серый: цветá EPA (зелёный/жёлтый/красный) заняты
+     семантикой категорий, цветная линия читалась бы как «уровень» */
+  --series-3: #6f6e69;
   --st-good: #0ca30c;
   --st-warn: #fab219;
   --st-serious: #ec835a;
@@ -36,6 +39,7 @@
     --border: rgba(255,255,255,0.10);
     --series-1: #3987e5;
     --series-2: #d95926;
+    --series-3: #a8a79e;
   }
 }
 * { box-sizing: border-box; }
@@ -185,7 +189,7 @@ footer a { color: var(--ink-2); }
   </div>
 
   <div class="card">
-    <h2>Пыль PM2.5 / PM10 <span class="u">· мкг/м³</span></h2>
+    <h2>Пыль PM2.5 / PM10 <span class="u">· мкг/м³ · AQI на правой оси</span></h2>
     <div class="chart-box"><canvas id="ch-pm"></canvas></div>
   </div>
   <div class="card">
@@ -424,8 +428,8 @@ function baseOptions() {
   };
 }
 
-function lineDataset(label, data, colorVar) {
-  return {
+function lineDataset(label, data, colorVar, extra = {}) {
+  return Object.assign({
     label,
     data,
     borderColor: css(colorVar),
@@ -436,7 +440,7 @@ function lineDataset(label, data, colorVar) {
     pointHitRadius: 10,
     tension: 0.25,
     spanGaps: true,
-  };
+  }, extra);
 }
 
 function buildCharts() {
@@ -455,6 +459,13 @@ function buildCharts() {
       chart.options.scales.x.ticks.maxTicksLimit = xTickLimit(size.width, per);
     };
     Object.assign(opts.scales.y, extraOpts.y || {});
+    // вторая ось (AQI): своей сетки не рисует — она наложилась бы на сетку левой
+    if (extraOpts.y1) opts.scales.y1 = Object.assign({
+      position: "right",
+      grid: { display: false },
+      border: { display: false },
+      ticks: { color: css("--muted"), maxTicksLimit: 6, padding: 6 },
+    }, extraOpts.y1);
     if (extraOpts.legend) opts.plugins.legend = {
       display: true, labels: { color: css("--ink-2"), boxWidth: 18, boxHeight: 3 },
     };
@@ -464,7 +475,11 @@ function buildCharts() {
   mk("#ch-pm", [
     lineDataset("PM2.5", pts.map(p => p.pm25), "--series-1"),
     lineDataset("PM10", pts.map(p => p.pm10), "--series-2"),
-  ], { legend: true, y: { beginAtZero: true } });
+    // AQI корзины: /history считает его на сервере (aqi.py) — на клиенте
+    // breakpoints не дублируем. Пунктир и своя ось: это индекс, не мкг/м³.
+    lineDataset("AQI", pts.map(p => p.aqi), "--series-3",
+                { yAxisID: "y1", borderWidth: 1.5, borderDash: [5, 4], tension: 0.25 }),
+  ], { legend: true, y: { beginAtZero: true }, y1: { beginAtZero: true } });
   mk("#ch-temp", [lineDataset("Температура", pts.map(p => p.temperature), "--series-1")]);
   mk("#ch-hum", [lineDataset("Влажность", pts.map(p => p.humidity), "--series-1")],
      { y: { suggestedMin: 0, suggestedMax: 100 } });
