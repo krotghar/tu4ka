@@ -13,6 +13,7 @@ import secrets
 import sqlite3
 import time
 from contextlib import asynccontextmanager, closing
+from datetime import datetime, timedelta, timezone
 
 import anyio
 from fastapi import FastAPI, HTTPException, Request
@@ -58,11 +59,12 @@ FIELD_MAP = {
     "signal": "signal",
 }
 
-PERIODS = {  # период истории -> (глубина, шаг усреднения), сек
-    "day": (24 * 3600, 300),
-    "week": (7 * 24 * 3600, 1800),
-    "month": (30 * 24 * 3600, 7200),
+PERIODS = {  # период истории -> шаг усреднения, сек
+    "day": 300,
+    "week": 1800,
+    "month": 7200,
 }
+MAX_TZ_OFFSET = 14 * 60  # минут; реальные зоны укладываются в UTC-12..UTC+14
 
 
 def db() -> sqlite3.Connection:
@@ -212,28 +214,60 @@ def current():
     return d
 
 
+def period_start(now: int, period: str, tz_offset: int) -> int:
+    """Начало календарных суток / недели / месяца, epoch-секунды.
+
+    tz_offset — часовой пояс клиента: минут к востоку от UTC, то есть
+    -Date.prototype.getTimezoneOffset() браузера. Календарные границы считаем
+    в этом поясе, иначе «начало суток» приедет в середину местного дня.
+    """
+    shift = tz_offset * 60
+    local = datetime.fromtimestamp(now + shift, tz=timezone.utc)
+    start = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == "week":
+        start -= timedelta(days=start.weekday())  # неделя с понедельника
+    elif period == "month":
+        start = start.replace(day=1)
+    return int(start.timestamp()) - shift
+
+
 @app.get("/api/v1/history")
-def history(period: str = "day"):
-    """История, усреднённая по корзинам: day (5 мин), week (30 мин), month (2 ч)."""
+def history(period: str = "day", tz_offset: int = 0):
+    """История с начала календарных суток / недели / месяца.
+
+    Усреднение по корзинам: day (5 мин), week (30 мин), month (2 ч). Корзины
+    отсчитываются от начала периода, поэтому первая всегда полная — иначе она
+    собиралась бы из пары измерений и давала выброс в начале графика.
+    Сетка плотная: корзины без измерений отдаются с null и n=0, чтобы график
+    занимал период целиком, даже когда данных за его начало нет.
+    """
     if period not in PERIODS:
         raise HTTPException(status_code=400,
                             detail=f"period must be one of {sorted(PERIODS)}")
-    span, bucket = PERIODS[period]
-    since = int(time.time()) - span
+    if not -MAX_TZ_OFFSET <= tz_offset <= MAX_TZ_OFFSET:
+        raise HTTPException(
+            status_code=400,
+            detail=f"tz_offset must be within ±{MAX_TZ_OFFSET} minutes")
+    bucket = PERIODS[period]
+    now = int(time.time())
+    start = period_start(now, period, tz_offset)
     with closing(db()) as conn:
         rows = conn.execute(
-            "SELECT (ts/?)*? AS t, round(avg(pm25),2) AS pm25,"
+            "SELECT ?+((ts-?)/?)*? AS t, round(avg(pm25),2) AS pm25,"
             " round(avg(pm10),2) AS pm10, round(avg(temperature),2) AS temperature,"
             " round(avg(humidity),2) AS humidity, round(avg(pressure),2) AS pressure,"
             " count(*) AS n FROM measurements WHERE ts >= ? GROUP BY t ORDER BY t",
-            (bucket, bucket, since),
+            (start, start, bucket, bucket, start),
         ).fetchall()
+    by_t = {r["t"]: dict(r) for r in rows}
     points = []
-    for r in rows:
-        p = dict(r)
+    for t in range(start, now + 1, bucket):
+        p = by_t.get(t) or {"t": t, "pm25": None, "pm10": None, "temperature": None,
+                            "humidity": None, "pressure": None, "n": 0}
         p["aqi"] = aqi.compute(p["pm25"], p["pm10"])["aqi"]  # мгновенный AQI корзины
         points.append(p)
-    return {"period": period, "bucket_s": bucket, "points": points}
+    return {"period": period, "bucket_s": bucket, "start": start, "end": now,
+            "points": points}
 
 
 @app.get("/healthz", include_in_schema=False)

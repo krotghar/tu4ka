@@ -71,9 +71,10 @@ h1 { font-size: 22px; margin: 0; }
 
 /* Тренд показателя за выбранный период */
 .trend { font-size: 12.5px; margin-top: 5px; display: flex; align-items: baseline;
-  gap: 5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  flex-wrap: wrap; gap: 0 5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .trend .arw { font-size: 12px; }
-.trend .tp { color: var(--muted); }
+/* название периода уезжает на вторую строку целиком, а не рвётся посередине */
+.trend .tp { color: var(--muted); white-space: nowrap; }
 .trend.good { color: var(--st-good); }
 .trend.bad { color: var(--st-critical); }
 
@@ -178,7 +179,7 @@ footer a { color: var(--ink-2); }
 
   <div class="controls" role="group" aria-label="Период">
     <span class="label">Период:</span>
-    <button class="seg" data-period="day" aria-pressed="true">Сутки</button>
+    <button class="seg" data-period="day" aria-pressed="true">Сегодня</button>
     <button class="seg" data-period="week" aria-pressed="false">Неделя</button>
     <button class="seg" data-period="month" aria-pressed="false">Месяц</button>
   </div>
@@ -240,7 +241,8 @@ const AQI_CATS = {
   hazardous:      { label: "Опасно",                    color: "#7e0023", ink: "#ffffff" },
 };
 const POLLUTANT_LABEL = { pm25: "PM2.5", pm10: "PM10" };
-const PERIOD_WORD = { day: "за сутки", week: "за неделю", month: "за месяц" };
+/* Периоды календарные, а не скользящие — тренд считается от начала суток/недели/месяца */
+const PERIOD_WORD = { day: "за сегодня", week: "с начала недели", month: "с начала месяца" };
 
 let period = "day";
 let charts = {};          // id -> Chart
@@ -374,9 +376,17 @@ async function loadCurrent() {
 function timeLabel(tSec) {
   const d = new Date(tSec * 1000);
   const p = (lastHistory && lastHistory.period) || period;
-  if (p === "day")
-    return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-  return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const hm = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  if (p === "day") return hm;
+  // без запятой toLocaleString: на оси каждый лишний символ — риск наложения
+  return `${d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })} ${hm}`;
+}
+
+/* Сколько подписей времени влезает по ширине: «00:00» вдвое уже «24.07 05:30».
+   Считаем сами, потому что Chart.js при заданном maxTicksLimit перестаёт
+   смотреть на ширину и на узком экране лепит подписи внахлёст. */
+function xTickLimit(width, p) {
+  return Math.max(2, Math.min(8, Math.floor(width / (p === "day" ? 50 : 85))));
 }
 
 function baseOptions() {
@@ -400,12 +410,15 @@ function baseOptions() {
       x: {
         grid: { color: gridColor, drawTicks: false },
         border: { color: axisColor },
-        ticks: { color: tickColor, maxTicksLimit: 8, maxRotation: 0, autoSkip: true },
+        // padding: иначе первая подпись времени вплотную подпирает нижнюю
+        // подпись оси Y и угол графика выглядит слипшимся
+        ticks: { color: tickColor, maxRotation: 0, autoSkip: true,
+                 autoSkipPadding: 8, padding: 10 },
       },
       y: {
         grid: { color: gridColor, drawTicks: false },
         border: { display: false },
-        ticks: { color: tickColor, maxTicksLimit: 6 },
+        ticks: { color: tickColor, maxTicksLimit: 6, padding: 6 },
       },
     },
   };
@@ -432,8 +445,15 @@ function buildCharts() {
   const pts = (lastHistory && lastHistory.points) || [];
   const labels = pts.map(p => timeLabel(p.t));
 
+  const per = (lastHistory && lastHistory.period) || period;
+
   const mk = (id, datasets, extraOpts = {}) => {
     const opts = baseOptions();
+    opts.scales.x.ticks.maxTicksLimit = xTickLimit($(id).parentElement.clientWidth, per);
+    // ширина меняется вместе с окном — лимит подписей пересчитываем на ресайзе
+    opts.onResize = (chart, size) => {
+      chart.options.scales.x.ticks.maxTicksLimit = xTickLimit(size.width, per);
+    };
     Object.assign(opts.scales.y, extraOpts.y || {});
     if (extraOpts.legend) opts.plugins.legend = {
       display: true, labels: { color: css("--ink-2"), boxWidth: 18, boxHeight: 3 },
@@ -452,7 +472,8 @@ function buildCharts() {
 }
 
 function buildTable() {
-  const pts = (lastHistory && lastHistory.points) || [];
+  // пустые корзины нужны графику для оси времени, в таблице это пустые строки
+  const pts = ((lastHistory && lastHistory.points) || []).filter(p => p.n > 0);
   $("#table-body").innerHTML = pts.slice().reverse().map(p =>
     `<tr><td>${timeLabel(p.t)}</td><td>${fmt(p.pm25)}</td><td>${fmt(p.pm10)}</td>` +
     `<td>${fmt(p.temperature)}</td><td>${fmt(p.humidity, 0)}</td><td>${fmt(p.pressure, 0)}</td></tr>`
@@ -463,7 +484,9 @@ async function loadHistory() {
   const gen = ++historyGen;
   let resp;
   try {
-    const r = await fetch(`/api/v1/history?period=${period}`);
+    // календарные границы периода сервер считает в поясе клиента
+    const tzOffset = -new Date().getTimezoneOffset();
+    const r = await fetch(`/api/v1/history?period=${period}&tz_offset=${tzOffset}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     resp = await r.json();
   } catch (e) {
