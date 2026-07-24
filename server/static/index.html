@@ -18,9 +18,6 @@
   --border: rgba(11,11,11,0.10);
   --series-1: #2a78d6;  /* PM2.5 */
   --series-2: #eb6834;  /* PM10 */
-  /* AQI — нейтральный серый: цветá EPA (зелёный/жёлтый/красный) заняты
-     семантикой категорий, цветная линия читалась бы как «уровень» */
-  --series-3: #6f6e69;
   --st-good: #0ca30c;
   --st-warn: #fab219;
   --st-serious: #ec835a;
@@ -39,7 +36,6 @@
     --border: rgba(255,255,255,0.10);
     --series-1: #3987e5;
     --series-2: #d95926;
-    --series-3: #a8a79e;
   }
 }
 * { box-sizing: border-box; }
@@ -189,7 +185,11 @@ footer a { color: var(--ink-2); }
   </div>
 
   <div class="card">
-    <h2>Пыль PM2.5 / PM10 <span class="u">· мкг/м³ · AQI на правой оси</span></h2>
+    <h2>Индекс качества воздуха <span class="u">· AQI (US EPA)</span></h2>
+    <div class="chart-box"><canvas id="ch-aqi"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Пыль PM2.5 / PM10 <span class="u">· мкг/м³</span></h2>
     <div class="chart-box"><canvas id="ch-pm"></canvas></div>
   </div>
   <div class="card">
@@ -235,15 +235,23 @@ const BANDS = {
 };
 
 /* Категории US EPA AQI: официальные цвета AirNow + русские подписи.
-   Цвет badge — фон, ink — читаемый текст поверх него. */
+   color — фон плашки, ink — читаемый текст поверх него, line — тот же оттенок
+   для линии графика. Официальные для линии не годятся: #ffff00 на светлом фоне
+   и #7e0023 на тёмном не видно, поэтому жёлтый затемнён, тёмные осветлены. */
 const AQI_CATS = {
-  good:           { label: "Хорошо",                    color: "#00e400", ink: "#0b3d0b" },
-  moderate:       { label: "Умеренно",                  color: "#ffff00", ink: "#4d3b00" },
-  usg:            { label: "Вредно для чувствительных", color: "#ff7e00", ink: "#3d1d00" },
-  unhealthy:      { label: "Вредно",                    color: "#ff0000", ink: "#ffffff" },
-  very_unhealthy: { label: "Очень вредно",              color: "#8f3f97", ink: "#ffffff" },
-  hazardous:      { label: "Опасно",                    color: "#7e0023", ink: "#ffffff" },
+  good:           { label: "Хорошо",                    color: "#00e400", ink: "#0b3d0b", line: "#0ca30c" },
+  moderate:       { label: "Умеренно",                  color: "#ffff00", ink: "#4d3b00", line: "#d1a200" },
+  usg:            { label: "Вредно для чувствительных", color: "#ff7e00", ink: "#3d1d00", line: "#ff7e00" },
+  unhealthy:      { label: "Вредно",                    color: "#ff0000", ink: "#ffffff", line: "#e83030" },
+  very_unhealthy: { label: "Очень вредно",              color: "#8f3f97", ink: "#ffffff", line: "#a259ab" },
+  hazardous:      { label: "Опасно",                    color: "#7e0023", ink: "#ffffff", line: "#c0184a" },
 };
+/* Верхние границы категорий — зеркало CATEGORIES в server/aqi.py. Нужны здесь,
+   чтобы покрасить линию по значению; оттуда же подпись категории в тултипе. */
+const AQI_BANDS = [[50, "good"], [100, "moderate"], [150, "usg"],
+                   [200, "unhealthy"], [300, "very_unhealthy"], [500, "hazardous"]];
+const aqiCat = v => AQI_CATS[(AQI_BANDS.find(b => v <= b[0]) || AQI_BANDS.at(-1))[1]];
+const aqiColor = v => v == null ? "#8a8a85" : aqiCat(v).line;
 const POLLUTANT_LABEL = { pm25: "PM2.5", pm10: "PM10" };
 /* Периоды календарные, а не скользящие — тренд считается от начала суток/недели/месяца */
 const PERIOD_WORD = { day: "за сегодня", week: "с начала недели", month: "с начала месяца" };
@@ -428,8 +436,8 @@ function baseOptions() {
   };
 }
 
-function lineDataset(label, data, colorVar, extra = {}) {
-  return Object.assign({
+function lineDataset(label, data, colorVar) {
+  return {
     label,
     data,
     borderColor: css(colorVar),
@@ -440,7 +448,7 @@ function lineDataset(label, data, colorVar, extra = {}) {
     pointHitRadius: 10,
     tension: 0.25,
     spanGaps: true,
-  }, extra);
+  };
 }
 
 function buildCharts() {
@@ -459,27 +467,33 @@ function buildCharts() {
       chart.options.scales.x.ticks.maxTicksLimit = xTickLimit(size.width, per);
     };
     Object.assign(opts.scales.y, extraOpts.y || {});
-    // вторая ось (AQI): своей сетки не рисует — она наложилась бы на сетку левой
-    if (extraOpts.y1) opts.scales.y1 = Object.assign({
-      position: "right",
-      grid: { display: false },
-      border: { display: false },
-      ticks: { color: css("--muted"), maxTicksLimit: 6, padding: 6 },
-    }, extraOpts.y1);
     if (extraOpts.legend) opts.plugins.legend = {
       display: true, labels: { color: css("--ink-2"), boxWidth: 18, boxHeight: 3 },
     };
+    if (extraOpts.aqi) {
+      // шаг 50 = ровно граница категории, по подписям оси видно, где смена цвета
+      opts.scales.y.ticks.stepSize = 50;
+      opts.plugins.tooltip.callbacks = {
+        label: c => c.parsed.y == null ? "AQI —"
+          : `AQI ${c.parsed.y} · ${aqiCat(c.parsed.y).label}`,
+        // иначе квадратик в тултипе останется цветом датасета, а не отрезка
+        labelColor: c => ({ borderColor: aqiColor(c.parsed.y),
+                            backgroundColor: aqiColor(c.parsed.y) }),
+      };
+    }
     charts[id] = new Chart($(id), { type: "line", data: { labels, datasets }, options: opts });
   };
 
+  // AQI корзины считает сервер (aqi.py) — breakpoints на клиенте не дублируем.
+  // Линия одноцветная, но цвет каждого отрезка — по категории его значения.
+  const aqiLine = lineDataset("AQI", pts.map(p => p.aqi), "--ink-2");
+  aqiLine.segment = { borderColor: c => aqiColor(c.p1.parsed.y) };
+  aqiLine.pointHoverBackgroundColor = c => aqiColor(c.raw);
+  mk("#ch-aqi", [aqiLine], { aqi: true, y: { beginAtZero: true, suggestedMax: 100 } });
   mk("#ch-pm", [
     lineDataset("PM2.5", pts.map(p => p.pm25), "--series-1"),
     lineDataset("PM10", pts.map(p => p.pm10), "--series-2"),
-    // AQI корзины: /history считает его на сервере (aqi.py) — на клиенте
-    // breakpoints не дублируем. Пунктир и своя ось: это индекс, не мкг/м³.
-    lineDataset("AQI", pts.map(p => p.aqi), "--series-3",
-                { yAxisID: "y1", borderWidth: 1.5, borderDash: [5, 4], tension: 0.25 }),
-  ], { legend: true, y: { beginAtZero: true }, y1: { beginAtZero: true } });
+  ], { legend: true, y: { beginAtZero: true } });
   mk("#ch-temp", [lineDataset("Температура", pts.map(p => p.temperature), "--series-1")]);
   mk("#ch-hum", [lineDataset("Влажность", pts.map(p => p.humidity), "--series-1")],
      { y: { suggestedMin: 0, suggestedMax: 100 } });
