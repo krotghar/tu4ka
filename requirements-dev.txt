@@ -1,0 +1,6 @@
+# Зависимости для локального прогона тестов и CI.
+# Прод-зависимости тянем из того же файла, что ставится на сервер.
+-r deploy/requirements.txt
+
+pytest
+httpx          # нужен fastapi.testclient.TestClient

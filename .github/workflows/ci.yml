@@ -1,0 +1,85 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:          # ручной перезапуск деплоя из вкладки Actions
+
+permissions:
+  contents: read
+
+concurrency:                  # два деплоя одновременно на один сервер недопустимы
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          # 3.12 — та же минорная версия, что стоит на сервере (Ubuntu 24.04)
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Syntax check
+        run: python -m py_compile server/*.py
+      - name: Unit tests
+        run: pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    # Гейт по ветке: workflow_dispatch позволяет запустить workflow с любого ref,
+    # и без этой строки ручной запуск с ветки уехал бы на прод.
+    if: github.ref == 'refs/heads/main'
+    # Без таймаута зависший ssh к недоступному серверу держал бы concurrency-группу
+    # до дефолтных 6 часов, блокируя все последующие деплои.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # Ключ раскладываем сами, без стороннего ssh-agent-экшена: это лишняя
+      # зависимость, которой пришлось бы доверить приватный ключ.
+      # deploy.sh при этом не меняется — он зовёт обычные ssh/rsync.
+      - name: Setup SSH
+        env:
+          # Через env, а не подстановкой ${{ }} прямо в тело скрипта — так
+          # содержимое ключа не попадает в текст команды.
+          SSH_KEY: ${{ secrets.TU4KA_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Явный конфиг вместо расчёта на подхват ключа по дефолтному имени:
+          # deploy.sh зовёт голый ssh/rsync, и гадать, какой ключ он выберет, незачем.
+          printf 'Host 178.160.230.131\n  User root\n  IdentityFile ~/.ssh/id_ed25519\n  IdentitiesOnly yes\n' > ~/.ssh/config
+          chmod 600 ~/.ssh/config
+          # Публичный host key сервера — не секрет, поэтому пиннится прямо здесь:
+          # так он лежит под ревью в git, а не прячется в настройках репозитория.
+          # Отпечаток: SHA256:l05HumMjOjjQHp1nfvea75Ga13NC5JwA9jEAiSD6dwI
+          echo '178.160.230.131 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBE4g9p6o88sZcpnnwmWbGqSoJGeYTf1KcVxTo7dOiqS' > ~/.ssh/known_hosts
+
+      - name: Deploy
+        run: ./deploy/deploy.sh
+        env:
+          TU4KA_HOST: root@178.160.230.131
+
+      # Ретраи, а не один curl после sleep: remote_setup.sh ждёт после restart
+      # всего 2 секунды, и единственная попытка дала бы то ложный минус на
+      # медленном старте uvicorn, то ложный плюс на сервисе, который упадёт следом.
+      - name: Smoke check
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS --max-time 10 http://178.160.230.131/healthz; then
+              echo
+              echo "healthz ответил с попытки $i"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "healthz не ответил за 10 попыток" >&2
+          exit 1
