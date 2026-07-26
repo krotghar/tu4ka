@@ -293,11 +293,24 @@ def test_push_valid_credentials_pass(auth_client):
     assert auth_client.get("/api/v1/current").json()["pm25"] == 7.1
 
 
+def _basic(user, password):
+    """Заголовок Basic из пары логин/пароль.
+
+    Собираем, а не пишем base64-литералом: захардкоженный
+    'basic dHU0a2E6...' неотличим от утёкших кред для секрет-сканеров и
+    исправно поднимает ложную тревогу (уже поднимал). Плюс креды теперь
+    в одном месте — в conftest.
+    """
+    return "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
+
+
 @pytest.mark.parametrize("header", [
     "Basic !!!not-base64!!!",         # не декодируется (binascii.Error)
     "Basic " + base64.b64encode(b"no-colon-here").decode(),  # нет разделителя
     "Bearer token",                   # не та схема
-    "basic dHU0a2E6dGVzdC1zZWNyZXQ=",  # схема с маленькой буквы
+    # Схема с маленькой буквы: креды верные, но main.py проверяет
+    # header.startswith("Basic ") — регистр важен, ждём 401.
+    _basic(PUSH_USER, PUSH_PASS).replace("Basic ", "basic ", 1),
     "",                               # пустой заголовок
 ])
 def test_push_broken_authorization_is_401_not_500(auth_client, header):
