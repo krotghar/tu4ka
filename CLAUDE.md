@@ -27,13 +27,20 @@ BME280 (температура, влажность, давление). Заме�
 ## Команды
 
 ```bash
-./deploy/deploy.sh                      # деплой на сервер (rsync + remote_setup.sh)
+.venv/bin/python -m pytest -q           # тесты (venv из requirements-dev.txt)
+./deploy/deploy.sh                      # ручной деплой (rsync + remote_setup.sh)
 ssh tu4ka journalctl -u tu4ka -f        # логи сервиса
 ssh tu4ka systemctl status tu4ka        # состояние сервиса
 curl http://178.160.230.131/healthz     # быстрая проверка живости
+gh run list --limit 5                   # прогоны CI
 ```
 
-Тестов и линтера пока нет; python-код проверяется `python3 -m py_compile`.
+**Деплой автоматический**: push в `main` запускает `.github/workflows/ci.yml` —
+джоб `test` (py_compile + pytest), затем `deploy`, который зовёт тот же
+`deploy/deploy.sh` с `TU4KA_HOST=root@178.160.230.131`. Красные тесты деплой не
+пускают. `deploy.sh` остаётся для ручного/аварийного прогона.
+
+Линтера нет. Тесты — pytest, лежат в `tests/`, 222 штуки.
 
 ## Архитектура
 
@@ -54,6 +61,15 @@ curl http://178.160.230.131/healthz     # быстрая проверка жив
 - `deploy/remote_setup.sh` — идемпотентная настройка сервера; креды push
   генерируются один раз в `/etc/tu4ka/env` (TU4KA_PUSH_USER/TU4KA_PUSH_PASS).
 - Код на сервере: `/opt/tu4ka/app`, venv `/opt/tu4ka/venv`.
+- `tests/` — pytest. `conftest.py` подменяет `main.DB_PATH`/`PUSH_*` через
+  `setattr`, а не переменными окружения: `main.py` читает их в глобалы на импорте,
+  так что `setenv` опаздывает. `TestClient` — только как контекст-менеджер, иначе
+  не отработает `lifespan` и в БД не будет схемы. Время в тестах истории заморожено
+  фикстурой `frozen_now` — без неё они плавают у границы суток.
+- `.github/workflows/ci.yml` — CI/CD. Ключ деплоя лежит в секрете репозитория
+  `TU4KA_SSH_KEY` (отдельный ed25519, в `authorized_keys` сервера с префиксом
+  `restrict`), host key сервера запиннен прямо в workflow — он публичный, и в git
+  его видно под ревью.
 
 Чего не ломать:
 
@@ -67,3 +83,7 @@ curl http://178.160.230.131/healthz     # быстрая проверка жив
 - Breakpoints AQI в `server/aqi.py` — из авторитетной таблицы AirNow (EPA), редакция
   2024. Не подгонять «по памяти»: при правках сверяться с первоисточником и держать
   самотест (эталонные точки: PM2.5 12.0→56, 35.4→100; PM10 155→101).
+- Корзины `/history` привязаны к `period_start`, а не к эпохе. Инвариант закрыт
+  тестом `test_history_buckets_are_anchored_to_period_start_not_epoch`: он специально
+  берёт `period=month, tz_offset=330`, где две привязки расходятся. На `tz_offset=0`
+  они совпадают, и регрессию не поймать — не «упрощать» кейс до UTC.
