@@ -221,7 +221,7 @@ button, input { font-family: inherit; }
 
 /* --- chart card --- */
 /* полоса над полем графика, зарезервированная под тултип — он живёт в ней, а не поверх линии */
-.chart-card { padding: 20px 22px 18px; flex: 1; display: flex; flex-direction: column; --tip-space: 72px; }
+.chart-card { padding: 20px 22px 18px; flex: 1; display: flex; flex-direction: column; --tip-space: 112px; }
 .chart-head { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
 .chart-head .u { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
 .tabs { margin-left: auto; display: flex; gap: 2px; border: 1px solid var(--input-line); border-radius: 8px; padding: 2px; }
@@ -250,7 +250,10 @@ button, input { font-family: inherit; }
 .tooltip .tw { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .tooltip .ta { display: flex; align-items: baseline; gap: 6px; margin-top: 5px; }
 .tooltip .ta .n { font-family: var(--font-mono); font-size: 22px; font-weight: 500; letter-spacing: -0.03em; }
+.tooltip .ta .c { font-size: 12.5px; font-weight: 600; }
 .tooltip .ta .u { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.tooltip .tx { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); margin-top: 4px; }
+.tooltip .tx:empty { display: none; }
 
 .x-labels { display: flex; justify-content: space-between; margin: 9px 0 0 42px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
 
@@ -369,7 +372,9 @@ footer a { margin-left: auto; }
             <div class="cursor-dot" id="cursor-dot"></div>
             <div class="tooltip" id="tooltip">
               <div class="tw" id="tip-when"></div>
-              <div class="ta"><span class="n" id="tip-val"></span><span class="u" id="tip-unit"></span></div>
+              <div class="ta"><span class="n" id="tip-val"></span><span id="tip-sub"></span></div>
+              <div class="tx" id="tip-range"></div>
+              <div class="tx" id="tip-pm"></div>
             </div>
           </div>
         </div>
@@ -569,6 +574,10 @@ let currentAgeAt = 0;
 let chartPts = [];
 let chartVals = [];
 let chartYPct = null;
+/* сглажены тем же окном, что и линия: тултип обязан описывать одну точку кривой,
+   иначе в нём окажется AQI, который из показанного PM2.5 не выводится */
+let chartLo = null, chartHi = null;   // границы ленты разброса; null — ленты нет
+let chartPm = null;                   // {pm25, pm10} — только когда выбран AQI
 
 function fmtAge(s) {
   if (s < 90) return `${s} с назад`;
@@ -722,6 +731,7 @@ function renderChart() {
     chartPts = [];
     chartVals = [];
     chartYPct = null;
+    chartLo = chartHi = chartPm = null;
     empty.hidden = false;
     $("#chart-line").setAttribute("d", "");
     $("#chart-band").setAttribute("d", "");
@@ -743,6 +753,11 @@ function renderChart() {
   const loVals = hasBand ? rolling(rolling(pts.map(p => p[key + "_lo"]), smoothK), smoothK) : null;
   const midVals = rolling(pts.map(p => p[key]), smoothK);
   chartVals = midVals;
+  chartLo = loVals;
+  chartHi = hiVals;
+  // у AQI вторая строка тултипа — сама пыль; сглаживаем тем же окном, иначе число
+  // AQI и показанные PM2.5/PM10 будут описывать разные точки
+  chartPm = isAqi ? {pm25: rolling(pts.map(p => p.pm25), smoothK), pm10: rolling(pts.map(p => p.pm10), smoothK)} : null;
 
   const nums = arr => arr.filter(v => v != null);
   const dataMax = Math.max(...nums(hasBand ? hiVals : midVals));
@@ -853,11 +868,16 @@ function updateTooltip(i) {
   $("#cursor-line").style.left = leftPct + "%";
   $("#tip-when").textContent = timeLabel(p.t, period, true);
 
+  const show = v => isAqi ? Math.round(v) : fmt(v, selDef[3]);
+
   if (val == null) {
     $("#cursor-dot").style.display = "none";
     $("#tip-val").textContent = "—";
     $("#tip-val").style.color = "";
-    $("#tip-unit").textContent = "нет данных";
+    $("#tip-sub").className = "u";
+    $("#tip-sub").textContent = "нет данных";
+    $("#tip-range").textContent = "";
+    $("#tip-pm").textContent = "";
     positionTooltip(leftPct);
     return;
   }
@@ -869,9 +889,18 @@ function updateTooltip(i) {
   $("#cursor-dot").style.left = leftPct + "%";
   $("#cursor-dot").style.top = chartYPct(val) + "%";
   $("#cursor-dot").style.background = color;
-  $("#tip-val").textContent = isAqi ? Math.round(val) : fmt(val, selDef[3]);
+  $("#tip-val").textContent = show(val);
   $("#tip-val").style.color = color;
-  $("#tip-unit").textContent = selDef[2];
+  // рядом с числом: у AQI — уровень словами, у прочих метрик — единица измерения
+  $("#tip-sub").className = isAqi ? "c" : "u";
+  $("#tip-sub").textContent = isAqi ? CATS[catKey(val)].label : selDef[2];
+  // разброс внутри корзины — ровно тот, что нарисован лентой; где ленты нет, нет и строки
+  const hasRange = chartLo && chartHi && chartLo[i] != null && chartHi[i] != null;
+  $("#tip-range").textContent = hasRange ? `диапазон ${show(chartLo[i])}–${show(chartHi[i])}` : "";
+  // у AQI — сама пыль, из которой он посчитан
+  const pm25 = chartPm && chartPm.pm25[i], pm10 = chartPm && chartPm.pm10[i];
+  $("#tip-pm").textContent = (pm25 != null || pm10 != null)
+    ? `PM2.5 ${fmt(pm25)} · PM10 ${fmt(pm10, 0)}` : "";
   positionTooltip(leftPct);
 }
 
