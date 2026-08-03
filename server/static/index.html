@@ -948,7 +948,8 @@ $("#chart-plot").addEventListener("mouseleave", hideTooltip);
 $("#metrics").addEventListener("click", e => {
   const card = e.target.closest(".metric-card");
   if (!card) return;
-  activeMetric = card.dataset.metric;
+  const key = card.dataset.metric;
+  activeMetric = activeMetric === key ? null : key;
   renderChart();
   renderMetrics();
 });
