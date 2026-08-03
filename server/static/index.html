@@ -223,7 +223,6 @@ button, input { font-family: inherit; }
 .chart-card { padding: 20px 22px 18px; flex: 1; display: flex; flex-direction: column; }
 .chart-head { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
 .chart-head .u { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
-.chart-head h2 { cursor: pointer; }
 .tabs { margin-left: auto; display: flex; gap: 2px; border: 1px solid var(--input-line); border-radius: 8px; padding: 2px; }
 .tab { font: inherit; font-size: 12px; padding: 6px 12px; border: 0; border-radius: 6px; cursor: pointer; background: transparent; color: var(--ink-2); }
 .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); font-weight: 600; }
@@ -255,7 +254,7 @@ button, input { font-family: inherit; }
 .x-labels { display: flex; justify-content: space-between; margin: 9px 0 0 42px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
 
 /* --- metrics row --- */
-.metrics-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.metrics-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
 .metric-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 15px 12px; cursor: pointer; transition: border-color .15s, background-color .15s; }
 .metric-card.active { border-color: var(--ink); background: var(--track); }
 .metric-name { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
@@ -348,7 +347,7 @@ footer a { margin-left: auto; }
     <div class="col-right">
       <div class="card chart-card">
         <div class="chart-head">
-          <h2 id="chart-title" title="Показать AQI">AQI</h2>
+          <h2 id="chart-title">AQI</h2>
           <span class="u" id="period-note"></span>
           <div class="tabs" id="tabs" role="group" aria-label="Период"></div>
         </div>
@@ -462,15 +461,17 @@ function periodVisible(key) {
   return key === "24h" || dataSpanS / FILL_REF_S[key] >= FILL_THRESHOLD;
 }
 
+/* Единый набор показателей: карточки внизу и большой график сверху читают отсюда.
+   [название, ключ, единица, знаков после запятой, опции тренда, мин. размах, шаг оси Y] */
 const METRIC_DEFS = [
-  ["PM2.5", "pm25", "мкг/м³", 1, { eps: 0.5, worseUp: true }, 6],
-  ["PM10", "pm10", "мкг/м³", 1, { eps: 0.5, worseUp: true }, 10],
-  ["Температура", "temperature", "°C", 1, { unit: "°", eps: 0.3 }, 6],
-  ["Влажность", "humidity", "%", 0, { digits: 0, unit: "%", eps: 1 }, 12],
-  ["Давление", "pressure", "гПа", 0, { digits: 0, eps: 0.5 }, 5],
+  ["AQI", "aqi", "", 0, { digits: 0, eps: 3 }, 12, 5],
+  ["PM2.5", "pm25", "мкг/м³", 1, { eps: 0.5, worseUp: true }, 6, 1],
+  ["PM10", "pm10", "мкг/м³", 1, { eps: 0.5, worseUp: true }, 10, 1],
+  ["Температура", "temperature", "°C", 1, { unit: "°", eps: 0.3 }, 6, 1],
+  ["Влажность", "humidity", "%", 0, { digits: 0, unit: "%", eps: 1 }, 12, 5],
+  ["Давление", "pressure", "гПа", 0, { digits: 0, eps: 0.5 }, 5, 5],
 ];
-/* Карточка, которая встаёт на место активной метрики — клик по ней возвращает AQI. */
-const AQI_DEF = ["AQI", "aqi", "", 0, { eps: 3, worseUp: true }, 10];
+const metricDef = key => METRIC_DEFS.find(m => m[1] === key) || METRIC_DEFS[0];
 
 /* Свой цвет метрики; PM и AQI ведёт категория текущего воздуха. */
 const METRIC_COLORS = { temperature: "#d97a4d", humidity: "#4a90c4", pressure: "#8b7dc4" };
@@ -555,7 +556,7 @@ function timeLabel(tSec, period, full) {
 
 /* --- состояние --- */
 let period = "24h";
-let activeMetric = null;  // null = график AQI, иначе ключ метрики (pm25, pm10, ...)
+let activeMetric = "aqi";  // ключ показателя, который сейчас на большом графике
 let mainHistory = null;   // /history для выбранного периода
 let dayHistory = null;    // /history?period=24h — всегда, для «худших часов» и сводки
 let historyGen = 0;
@@ -666,7 +667,7 @@ function renderDaySummary() {
   ).join("");
 }
 
-function metricCardHtml(pts, [name, key, unit, digits, topts, minSpan], attrs, cardClass) {
+function metricCardHtml(pts, [name, key, unit, digits, topts, minSpan]) {
   const raw = sample(pts.map(p => p[key]), 48);
   const vals = rolling(raw, Math.max(3, Math.round(raw.length / 8)));
   const nums = vals.filter(v => v != null);
@@ -687,7 +688,7 @@ function metricCardHtml(pts, [name, key, unit, digits, topts, minSpan], attrs, c
   }
   const curValue = key === "aqi" ? (current && current.aqi ? current.aqi.aqi : null) : (current ? current[key] : null);
   const t = trendText(trend(pts, key), topts);
-  return `<div class="metric-card${cardClass}" ${attrs}>` +
+  return `<div class="metric-card${key === activeMetric ? " active" : ""}" data-metric="${key}">` +
     `<div class="metric-head"><div class="metric-name">${name}</div>` +
     `<div class="metric-value"><span>${fmt(curValue, digits)}</span><span class="unit">${unit}</span></div></div>` +
     `<svg class="metric-spark" viewBox="0 0 100 22" preserveAspectRatio="none">` +
@@ -698,26 +699,20 @@ function metricCardHtml(pts, [name, key, unit, digits, topts, minSpan], attrs, c
 
 function renderMetrics() {
   const pts = (mainHistory && mainHistory.points) || [];
-  $("#metrics").innerHTML = METRIC_DEFS.map(def => {
-    const key = def[1];
-    if (key === activeMetric) {
-      // на месте кликнутой метрики — карточка AQI; клик по ней возвращает всё как было
-      return metricCardHtml(pts, AQI_DEF, `data-metric="${key}" data-role="back"`, " active");
-    }
-    return metricCardHtml(pts, def, `data-metric="${key}"`, "");
-  }).join("");
+  $("#metrics").innerHTML = METRIC_DEFS.map(def => metricCardHtml(pts, def)).join("");
 }
 
 function renderChart() {
   const key = activeMetric;
-  const metricDef = key ? METRIC_DEFS.find(m => m[1] === key) : null;
+  const selDef = metricDef(key);
+  const isAqi = key === "aqi";
+  const digits = selDef[3], minSpan = selDef[5], step = selDef[6];
   const pts = (mainHistory && mainHistory.points) || [];
   chartPts = pts;
   const n = pts.length;
   const empty = $("#chart-empty");
-  const hasAny = pts.some(p => (key ? p[key] : p.aqi) != null);
-  $("#chart-title").textContent = metricDef ? metricDef[0] : "AQI";
-  $("#chart-title").title = key ? "Вернуться к AQI" : "AQI";
+  const hasAny = pts.some(p => p[key] != null);
+  $("#chart-title").textContent = selDef[0];
   $("#period-note").textContent = (PERIODS.find(p => p.key === period) || PERIODS[0]).note;
 
   hideTooltip();
@@ -734,21 +729,21 @@ function renderChart() {
 
   const W = 1000, H = 300;
   const smoothK = Math.max(3, Math.round(n / 12));
-  const bk = key || "aqi";
-  const bandEps = !key ? 1 : (key === "pressure" || key === "humidity") ? 0.3 : 0.15;
-  const hasBand = pts.some(p => p[bk + "_hi"] != null && p[bk + "_lo"] != null && p[bk + "_hi"] - p[bk + "_lo"] > bandEps);
+  const bandEps = isAqi ? 1 : (key === "pressure" || key === "humidity") ? 0.3 : 0.15;
+  const hasBand = pts.some(p => p[key + "_hi"] != null && p[key + "_lo"] != null && p[key + "_hi"] - p[key + "_lo"] > bandEps);
   chartHasBand = hasBand;
-  const hiVals = hasBand ? rolling(rolling(pts.map(p => p[bk + "_hi"]), smoothK), smoothK) : null;
-  const loVals = hasBand ? rolling(rolling(pts.map(p => p[bk + "_lo"]), smoothK), smoothK) : null;
-  const rawVals = pts.map(p => (key ? p[key] : p.aqi));
-  const midVals = (hasBand || key) ? rolling(rawVals, smoothK) : rawVals;
+  const hiVals = hasBand ? rolling(rolling(pts.map(p => p[key + "_hi"]), smoothK), smoothK) : null;
+  const loVals = hasBand ? rolling(rolling(pts.map(p => p[key + "_lo"]), smoothK), smoothK) : null;
+  const midVals = rolling(pts.map(p => p[key]), smoothK);
 
   const nums = arr => arr.filter(v => v != null);
   const dataMax = Math.max(...nums(hasBand ? hiVals : midVals));
   const dataMin = Math.min(...nums(hasBand ? loVals : midVals));
-  const pad = Math.max(6, (dataMax - dataMin) * 0.25);
-  const top = Math.ceil((dataMax + pad) / 5) * 5;
-  const bottom = key ? Math.floor((dataMin - pad) / 5) * 5 : Math.max(0, Math.floor((dataMin - pad) / 5) * 5);
+  // шкала по данным, а не от нуля; зажим нулём — только для AQI
+  const pad = Math.max(minSpan / 2, (dataMax - dataMin) * 0.25);
+  const top = Math.ceil((dataMax + pad) / step) * step;
+  const rawBottom = Math.floor((dataMin - pad) / step) * step;
+  const bottom = isAqi ? Math.max(0, rawBottom) : rawBottom;
   const span = top - bottom || 1;
   chartTop = top;
   chartBottom = bottom;
@@ -787,15 +782,9 @@ function renderChart() {
   $("#chart-line").setAttribute("d", segPath(midVals));
   $("#chart-band").setAttribute("d", hasBand ? bandPathOf(hiVals, loVals) : "");
 
-  if (key) {
-    // одна метрика — сплошной цвет метрики через тот же градиент, чтобы лента красилась сама
-    $("#chart-line").setAttribute("stroke", "url(#aqiGrad)");
-    const c = metricColor(key);
-    $("#aqiGrad").innerHTML = `<stop offset="0%" stop-color="${c}"></stop><stop offset="100%" stop-color="${c}"></stop>`;
-  } else {
-    // цветовой градиент линии — по категории значения в каждой точке
-    $("#chart-line").setAttribute("stroke", "url(#aqiGrad)");
-    const stops = [];
+  // AQI — градиент по категории значения в каждой точке; прочие метрики — ровный цвет
+  const stops = [];
+  if (isAqi) {
     let prevStop = null;
     midVals.forEach((v, i) => {
       if (v == null) return;
@@ -806,24 +795,25 @@ function renderChart() {
       prevStop = { c, off };
     });
     if (prevStop) stops.push({ o: "100%", c: prevStop.c });
-    const grad = $("#aqiGrad");
-    grad.innerHTML = stops.map(s => `<stop offset="${s.o}" stop-color="${s.c}"></stop>`).join("");
+  } else {
+    const c = metricColor(key);
+    stops.push({ o: "0%", c }, { o: "100%", c });
   }
+  $("#aqiGrad").innerHTML = stops.map(s => `<stop offset="${s.o}" stop-color="${s.c}"></stop>`).join("");
 
-  // сетка Y
-  const gridVals = key
-    ? [0.25, 0.5, 0.75].map(f => bottom + span * f).filter(v => v > bottom + span * 0.06 && v < top - span * 0.06)
-    : [25, 50, 75, 100, 150, 200, 300].filter(v => v > bottom + span * 0.06 && v < top - span * 0.06);
+  // сетка Y: у AQI — пороги категорий их же цветом, у остальных — ровные четверти шкалы
+  const gridVals = (isAqi ? [25, 50, 75, 100, 150, 200, 300] : [0.25, 0.5, 0.75].map(f => bottom + span * f))
+    .filter(v => v > bottom + span * 0.06 && v < top - span * 0.06);
   document.querySelectorAll(".gridline").forEach(el => el.remove());
   const plot = $("#chart-plot");
   for (const v of gridVals) {
     const el = document.createElement("div");
     el.className = "gridline";
     el.style.top = yPct(v);
-    el.style.borderColor = key ? "var(--axis)" : CATS[catKey(v)].line;
+    el.style.borderColor = isAqi ? CATS[catKey(v)].line : "var(--line-strong)";
     plot.insertBefore(el, plot.firstChild);
   }
-  const gridLabel = v => key ? fmt(v, metricDef[3]) : v;
+  const gridLabel = v => isAqi ? v : fmt(v, digits);
   $("#y-axis").innerHTML =
     `<span class="yfix ytop">${gridLabel(top)}</span>` +
     gridVals.map(v => `<span class="gridlabel" style="top:${yPct(v)}">${gridLabel(v)}</span>`).join("") +
@@ -846,7 +836,9 @@ function updateTooltip(i) {
   i = Math.max(0, Math.min(n - 1, i));
   const p = chartPts[i];
   const key = activeMetric;
-  const val = key ? p[key] : p.aqi;
+  const isAqi = key === "aqi";
+  const selDef = metricDef(key);
+  const val = p[key];
   const leftPct = n === 1 ? 50 : i / (n - 1) * 100;
   $("#cursor-line").style.display = "block";
   $("#cursor-line").style.left = leftPct + "%";
@@ -863,39 +855,28 @@ function updateTooltip(i) {
   }
   const span = chartTop - chartBottom || 1;
   const yPct = ((1 - (val - chartBottom) / span) * 100);
+  const color = metricColor(key);
 
-  if (key) {
-    const metricDef = METRIC_DEFS.find(m => m[1] === key);
-    const color = metricColor(key);
-    $("#cursor-dot").style.display = "block";
-    $("#cursor-dot").style.left = leftPct + "%";
-    $("#cursor-dot").style.top = yPct + "%";
-    $("#cursor-dot").style.background = color;
-    $("#tip-when").textContent = timeLabel(p.t, period, true);
-    $("#tip-aqi").textContent = fmt(val, metricDef[3]);
-    $("#tip-aqi").style.color = color;
-    $("#tip-cat").textContent = metricDef[2];
-    $("#tip-range").textContent = chartHasBand && p[key + "_lo"] != null && p[key + "_hi"] != null
-      ? `диапазон ${fmt(p[key + "_lo"], metricDef[3])}–${fmt(p[key + "_hi"], metricDef[3])}`
-      : "";
-    $("#tip-pm").textContent = "";
-    positionTooltip(leftPct);
-    return;
-  }
-  const color = CATS[catKey(val)].line;
   $("#cursor-dot").style.display = "block";
   $("#cursor-dot").style.left = leftPct + "%";
   $("#cursor-dot").style.top = yPct + "%";
   $("#cursor-dot").style.background = color;
   $("#tip-when").textContent = timeLabel(p.t, period, true);
-  $("#tip-aqi").textContent = Math.round(val);
+  $("#tip-aqi").textContent = isAqi ? Math.round(val) : fmt(val, selDef[3]);
   $("#tip-aqi").style.color = color;
-  $("#tip-cat").textContent = CATS[catKey(val)].label;
-  $("#tip-range").textContent = chartHasBand && p.aqi_hi != null && p.aqi_lo != null
-    ? `диапазон ${Math.round(p.aqi_lo)}–${Math.round(p.aqi_hi)}`
-    : (p.pm25 != null ? `PM2.5 ${fmt(p.pm25)}` : "");
-  $("#tip-pm").textContent = (p.pm25 != null || p.pm10 != null)
-    ? `PM2.5 ${fmt(p.pm25)} · PM10 ${fmt(p.pm10, 0)}` : "";
+  $("#tip-cat").textContent = isAqi ? CATS[catKey(val)].label : selDef[2];
+  // разброс внутри корзины по выбранному показателю; для AQI — запасной вариант PM2.5, если ленты нет
+  $("#tip-range").textContent = isAqi
+    ? (chartHasBand && p.aqi_hi != null && p.aqi_lo != null
+        ? `диапазон ${Math.round(p.aqi_lo)}–${Math.round(p.aqi_hi)}`
+        : (p.pm25 != null ? `PM2.5 ${fmt(p.pm25)}` : ""))
+    : (chartHasBand && p[key + "_lo"] != null && p[key + "_hi"] != null
+        ? `диапазон ${fmt(p[key + "_lo"], selDef[3])}–${fmt(p[key + "_hi"], selDef[3])}`
+        : "");
+  // у AQI вторая строка — PM2.5/PM10, у прочих метрик — сам AQI как контекст
+  $("#tip-pm").textContent = isAqi
+    ? ((p.pm25 != null || p.pm10 != null) ? `PM2.5 ${fmt(p.pm25)} · PM10 ${fmt(p.pm10, 0)}` : "")
+    : (p.aqi != null ? `AQI ${Math.round(p.aqi)}` : "");
   positionTooltip(leftPct);
 }
 
@@ -974,14 +955,8 @@ $("#chart-plot").addEventListener("mouseleave", hideTooltip);
 
 $("#metrics").addEventListener("click", e => {
   const card = e.target.closest(".metric-card");
-  if (!card) return;
-  activeMetric = card.dataset.role === "back" ? null : card.dataset.metric;
-  renderChart();
-  renderMetrics();
-});
-$("#chart-title").addEventListener("click", () => {
-  if (activeMetric == null) return;
-  activeMetric = null;
+  if (!card || card.dataset.metric === activeMetric) return;
+  activeMetric = card.dataset.metric;
   renderChart();
   renderMetrics();
 });
