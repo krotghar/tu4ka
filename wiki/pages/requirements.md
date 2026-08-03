@@ -84,6 +84,7 @@
 | O5 | Сервис: systemd-юнит `tu4ka`, uvicorn на порту 80; `/healthz` отвечает после деплоя | manual |
 | O6 | Тесты — pytest в `tests/`, прогон `.venv/bin/python -m pytest -q`, все зелёные. Линтера в проекте нет — не заводить без просьбы | auto |
 | O7 | Вики (`wiki/pages/`, `wiki/index.md`, `wiki/log.md`) обновляется вместе с изменением поведения — иначе она врёт | manual |
+| O8 | Домен `amqi.am`: A-записи `amqi.am`/`www.amqi.am` (сайт) и `push.amqi.am` (приём) ведут на `178.160.230.131`, проксирование Cloudflare выключено на всех трёх. Оранжевое облако ломает Let's Encrypt по HTTP-01 и не должно стоять на пути push. См. [domain-dns](domain-dns.md) | manual |
 
 ## Источники
 

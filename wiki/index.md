@@ -18,6 +18,7 @@
 - [frontend-redesign](pages/frontend-redesign.md) — редизайн дашборда: свой SVG вместо Chart.js, вендоренные шрифты, скользящие окна
 - [dashboard-metric-selector](pages/dashboard-metric-selector.md) — шесть карточек и один график: `METRIC_DEFS`, шаги осей, цвет и лента разброса по метрике, курсор и тултип, откуда берётся макет
 - [deploy-cicd](pages/deploy-cicd.md) — VPS, systemd, автодеплой через CI, ключ деплоя
+- [domain-dns](pages/domain-dns.md) — домен `amqi.am`, зона в Cloudflare через name.am, три A-записи и почему проксирование намеренно выключено
 
 ## Roadmap/решения
 

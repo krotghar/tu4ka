@@ -4,6 +4,10 @@
 
 - Сервер: VPS `178.160.230.131`, Ubuntu 24.04, 2 ГБ RAM. ssh-алиас `tu4ka`
   (root, ключ `~/.ssh/tu4ka`).
+- Домен `amqi.am`: `amqi.am`/`www.amqi.am` — сайт, `push.amqi.am` — приём от
+  датчика. Пока все три A-записи ведут на тот же IP и отдают одно и то же
+  (uvicorn не смотрит на `Host`); TLS и разведение по `server_name` — впереди.
+  См. [domain-dns](domain-dns.md).
 - FastAPI + uvicorn на порту 80, systemd-юнит `tu4ka`;
   `ExecStart=… uvicorn server.main:app --app-dir /opt/tu4ka/app`.
 - SQLite `/var/lib/tu4ka/tu4ka.db` (WAL) — **вне** `/opt/tu4ka`, так что деплой
@@ -47,6 +51,7 @@ Host key сервера запиннен прямо в workflow-файле — �
 ssh tu4ka journalctl -u tu4ka -f        # логи сервиса
 ssh tu4ka systemctl status tu4ka        # состояние сервиса
 curl http://178.160.230.131/healthz     # живость
+curl http://amqi.am/healthz             # то же по домену
 gh run list --limit 5                   # прогоны CI
 ```
 
