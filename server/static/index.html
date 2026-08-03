@@ -729,9 +729,9 @@ function renderChart() {
 
   const W = 1000, H = 300;
   const smoothK = Math.max(3, Math.round(n / 12));
-  // лента разброса: у AQI всегда, у пыли — кроме 24ч (там корзины часовые, лента шумит),
+  // лента разброса: у AQI и пыли — кроме 24ч (там корзины часовые, лента шумит),
   // у температуры/влажности/давления — не показываем вовсе
-  const bandAllowed = isAqi || ((key === "pm25" || key === "pm10") && period !== "24h");
+  const bandAllowed = (isAqi || key === "pm25" || key === "pm10") && period !== "24h";
   const bandEps = isAqi ? 1 : 0.15;
   const hasBand = bandAllowed && pts.some(p => p[key + "_hi"] != null && p[key + "_lo"] != null && p[key + "_hi"] - p[key + "_lo"] > bandEps);
   chartHasBand = hasBand;
