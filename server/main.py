@@ -287,7 +287,7 @@ def history(period: str = "24h", tz_offset: int = 0):
         p["aqi_hi"] = aqi.compute(p.pop("pm25_hi"), p.pop("pm10_hi"))["aqi"]
         points.append(p)
     return {"period": period, "bucket_s": bucket, "start": start, "end": now,
-            "points": points}
+            "first_ts": first_ts, "points": points}
 
 
 @app.get("/healthz", include_in_schema=False)

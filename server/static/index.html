@@ -450,6 +450,18 @@ const PERIODS = [
   { key: "all", label: "всё", note: "вся история · по 2 недели" },
 ];
 
+/* Селектор периода скрываем, пока реальных данных недостаточно, чтобы
+   заполнить график (иначе почти пустая линия на фоне пустой сетки).
+   "12m" и "all" делят один и тот же порог: пока данных меньше трети
+   года, "all" всё равно совпадает с "12m" и выглядит так же пусто. */
+const FILL_THRESHOLD = 0.3;
+const FILL_REF_S = { "7d": 7 * 86400, "30d": 30 * 86400, "12m": 364 * 86400, "all": 364 * 86400 };
+let dataSpanS = 0; // now - first_ts, обновляется из ответа /api/v1/history
+
+function periodVisible(key) {
+  return key === "24h" || dataSpanS / FILL_REF_S[key] >= FILL_THRESHOLD;
+}
+
 const METRIC_DEFS = [
   ["PM2.5", "pm25", "мкг/м³", 1, { eps: 0.5, worseUp: true }, 6],
   ["PM10", "pm10", "мкг/м³", 1, { eps: 0.5, worseUp: true }, 10],
@@ -905,13 +917,15 @@ async function loadHistory() {
   if (gen !== historyGen) return; // пришёл ответ на устаревший запрос
   mainHistory = main;
   dayHistory = day;
+  if (day.first_ts != null) dataSpanS = day.end - day.first_ts;
+  buildTabs();
   renderChart();
   renderMetrics();
   renderDaySummary();
 }
 
 function buildTabs() {
-  $("#tabs").innerHTML = PERIODS.map(p =>
+  $("#tabs").innerHTML = PERIODS.filter(p => periodVisible(p.key)).map(p =>
     `<button class="tab" data-period="${p.key}" aria-pressed="${p.key === period}">${p.label}</button>`
   ).join("");
   for (const btn of document.querySelectorAll(".tab")) {
