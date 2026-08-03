@@ -9,8 +9,8 @@
 
 - [protocol-airrohr-push](pages/protocol-airrohr-push.md) — формат `POST /api/v1/push`, маппинг полей, авторизация датчика
 - [aqi-nowcast](pages/aqi-nowcast.md) — breakpoints EPA AQI, NowCast vs мгновенный AQI (+ lo/hi разброс), открытый TODO по источнику
-- [history-buckets](pages/history-buckets.md) — скользящие окна `/history`, почему корзины привязаны к tz-сдвинутой сетке, а не к эпохе
-- [frontend-redesign](pages/frontend-redesign.md) — редизайн дашборда: свой SVG вместо Chart.js, вендоренные шрифты, скользящие окна
+- [history-buckets](pages/history-buckets.md) — скользящие окна `/history`, почему корзины привязаны к tz-сдвинутой сетке, а не к эпохе; `aqi_lo`/`_hi` и `<метрика>_lo`/`_hi` для ленты разброса
+- [frontend-redesign](pages/frontend-redesign.md) — редизайн дашборда: свой SVG вместо Chart.js, вендоренные шрифты, скользящие окна, цвет по метрике и лента разброса на графике
 - [deploy-cicd](pages/deploy-cicd.md) — VPS, systemd, автодеплой через CI, ключ деплоя
 
 ## Roadmap/решения

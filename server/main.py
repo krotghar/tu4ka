@@ -254,6 +254,10 @@ def history(period: str = "24h", tz_offset: int = 0):
     максимуму PM внутри корзины (диапазон для ленты на графике). aqi_hi точен
     (sub-index монотонен по концентрации), aqi_lo — нижняя оценка: реальный
     минимум max(pm25_aqi, pm10_aqi) внутри корзины может быть чуть выше.
+
+    <метрика>_lo/_hi (pm25, pm10, temperature, humidity, pressure) — минимум и
+    максимум самой метрики внутри корзины, для ленты разброса на графике при
+    выборе этой метрики.
     """
     if period not in PERIODS:
         raise HTTPException(status_code=400,
@@ -271,20 +275,28 @@ def history(period: str = "24h", tz_offset: int = 0):
             "SELECT ?+((ts-?)/?)*? AS t, round(avg(pm25),2) AS pm25,"
             " round(avg(pm10),2) AS pm10, round(avg(temperature),2) AS temperature,"
             " round(avg(humidity),2) AS humidity, round(avg(pressure),2) AS pressure,"
-            " min(pm25) AS pm25_lo, max(pm25) AS pm25_hi,"
-            " min(pm10) AS pm10_lo, max(pm10) AS pm10_hi,"
+            " round(min(pm25),2) AS pm25_lo, round(max(pm25),2) AS pm25_hi,"
+            " round(min(pm10),2) AS pm10_lo, round(max(pm10),2) AS pm10_hi,"
+            " round(min(temperature),2) AS temperature_lo, round(max(temperature),2) AS temperature_hi,"
+            " round(min(humidity),2) AS humidity_lo, round(max(humidity),2) AS humidity_hi,"
+            " round(min(pressure),2) AS pressure_lo, round(max(pressure),2) AS pressure_hi,"
             " count(*) AS n FROM measurements WHERE ts >= ? GROUP BY t ORDER BY t",
             (start, start, bucket, bucket, start),
         ).fetchall()
     by_t = {r["t"]: dict(r) for r in rows}
     points = []
     for t in range(start, end + 1, bucket):
-        p = by_t.get(t) or {"t": t, "pm25": None, "pm10": None, "temperature": None,
-                            "humidity": None, "pressure": None, "n": 0,
-                            "pm25_lo": None, "pm25_hi": None, "pm10_lo": None, "pm10_hi": None}
+        p = by_t.get(t) or {
+            "t": t, "pm25": None, "pm10": None, "temperature": None,
+            "humidity": None, "pressure": None, "n": 0,
+            "pm25_lo": None, "pm25_hi": None, "pm10_lo": None, "pm10_hi": None,
+            "temperature_lo": None, "temperature_hi": None,
+            "humidity_lo": None, "humidity_hi": None,
+            "pressure_lo": None, "pressure_hi": None,
+        }
         p["aqi"] = aqi.compute(p["pm25"], p["pm10"])["aqi"]  # мгновенный AQI корзины
-        p["aqi_lo"] = aqi.compute(p.pop("pm25_lo"), p.pop("pm10_lo"))["aqi"]
-        p["aqi_hi"] = aqi.compute(p.pop("pm25_hi"), p.pop("pm10_hi"))["aqi"]
+        p["aqi_lo"] = aqi.compute(p["pm25_lo"], p["pm10_lo"])["aqi"]
+        p["aqi_hi"] = aqi.compute(p["pm25_hi"], p["pm10_hi"])["aqi"]
         points.append(p)
     return {"period": period, "bucket_s": bucket, "start": start, "end": now,
             "first_ts": first_ts, "points": points}

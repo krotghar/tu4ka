@@ -472,6 +472,14 @@ const METRIC_DEFS = [
 /* Карточка, которая встаёт на место активной метрики — клик по ней возвращает AQI. */
 const AQI_DEF = ["AQI", "aqi", "", 0, { eps: 3, worseUp: true }, 10];
 
+/* Свой цвет метрики; PM и AQI ведёт категория текущего воздуха. */
+const METRIC_COLORS = { temperature: "#d97a4d", humidity: "#4a90c4", pressure: "#8b7dc4" };
+function metricColor(key) {
+  if (METRIC_COLORS[key]) return METRIC_COLORS[key];
+  const a = current && current.aqi ? current.aqi.aqi : null;
+  return a == null ? "var(--ink)" : CATS[catKey(a)].line;
+}
+
 const fmt = (v, d = 1) => (v == null ? "—" : Number(v).toFixed(d).replace(".", ","));
 
 /* Catmull-Rom → кубические Безье: мягкая линия вместо ломаной. */
@@ -683,7 +691,7 @@ function metricCardHtml(pts, [name, key, unit, digits, topts, minSpan], attrs, c
     `<div class="metric-head"><div class="metric-name">${name}</div>` +
     `<div class="metric-value"><span>${fmt(curValue, digits)}</span><span class="unit">${unit}</span></div></div>` +
     `<svg class="metric-spark" viewBox="0 0 100 22" preserveAspectRatio="none">` +
-    `<path d="${sparkPath}" fill="none" stroke="${["pm25", "pm10", "aqi"].includes(key) ? "var(--ink)" : "var(--muted)"}" ` +
+    `<path d="${sparkPath}" fill="none" stroke="${metricColor(key)}" ` +
     `stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"></path></svg>` +
     `<div class="metric-trend" style="color:${t.color}">${t.arrow} ${t.text}</div></div>`;
 }
@@ -726,10 +734,12 @@ function renderChart() {
 
   const W = 1000, H = 300;
   const smoothK = Math.max(3, Math.round(n / 12));
-  const hasBand = !key && pts.some(p => p.aqi_hi != null && p.aqi_lo != null && p.aqi_hi - p.aqi_lo > 1);
+  const bk = key || "aqi";
+  const bandEps = !key ? 1 : (key === "pressure" || key === "humidity") ? 0.3 : 0.15;
+  const hasBand = pts.some(p => p[bk + "_hi"] != null && p[bk + "_lo"] != null && p[bk + "_hi"] - p[bk + "_lo"] > bandEps);
   chartHasBand = hasBand;
-  const hiVals = hasBand ? rolling(rolling(pts.map(p => p.aqi_hi), smoothK), smoothK) : null;
-  const loVals = hasBand ? rolling(rolling(pts.map(p => p.aqi_lo), smoothK), smoothK) : null;
+  const hiVals = hasBand ? rolling(rolling(pts.map(p => p[bk + "_hi"]), smoothK), smoothK) : null;
+  const loVals = hasBand ? rolling(rolling(pts.map(p => p[bk + "_lo"]), smoothK), smoothK) : null;
   const rawVals = pts.map(p => (key ? p[key] : p.aqi));
   const midVals = (hasBand || key) ? rolling(rawVals, smoothK) : rawVals;
 
@@ -738,7 +748,7 @@ function renderChart() {
   const dataMin = Math.min(...nums(hasBand ? loVals : midVals));
   const pad = Math.max(6, (dataMax - dataMin) * 0.25);
   const top = Math.ceil((dataMax + pad) / 5) * 5;
-  const bottom = Math.max(0, Math.floor((dataMin - pad) / 5) * 5);
+  const bottom = key ? Math.floor((dataMin - pad) / 5) * 5 : Math.max(0, Math.floor((dataMin - pad) / 5) * 5);
   const span = top - bottom || 1;
   chartTop = top;
   chartBottom = bottom;
@@ -778,8 +788,10 @@ function renderChart() {
   $("#chart-band").setAttribute("d", hasBand ? bandPathOf(hiVals, loVals) : "");
 
   if (key) {
-    // одна метрика — сплошная линия, без категорийного градиента
-    $("#chart-line").setAttribute("stroke", "var(--ink-2)");
+    // одна метрика — сплошной цвет метрики через тот же градиент, чтобы лента красилась сама
+    $("#chart-line").setAttribute("stroke", "url(#aqiGrad)");
+    const c = metricColor(key);
+    $("#aqiGrad").innerHTML = `<stop offset="0%" stop-color="${c}"></stop><stop offset="100%" stop-color="${c}"></stop>`;
   } else {
     // цветовой градиент линии — по категории значения в каждой точке
     $("#chart-line").setAttribute("stroke", "url(#aqiGrad)");
@@ -854,7 +866,7 @@ function updateTooltip(i) {
 
   if (key) {
     const metricDef = METRIC_DEFS.find(m => m[1] === key);
-    const color = "var(--ink-2)";
+    const color = metricColor(key);
     $("#cursor-dot").style.display = "block";
     $("#cursor-dot").style.left = leftPct + "%";
     $("#cursor-dot").style.top = yPct + "%";
@@ -863,7 +875,9 @@ function updateTooltip(i) {
     $("#tip-aqi").textContent = fmt(val, metricDef[3]);
     $("#tip-aqi").style.color = color;
     $("#tip-cat").textContent = metricDef[2];
-    $("#tip-range").textContent = "";
+    $("#tip-range").textContent = chartHasBand && p[key + "_lo"] != null && p[key + "_hi"] != null
+      ? `диапазон ${fmt(p[key + "_lo"], metricDef[3])}–${fmt(p[key + "_hi"], metricDef[3])}`
+      : "";
     $("#tip-pm").textContent = "";
     positionTooltip(leftPct);
     return;

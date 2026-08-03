@@ -542,6 +542,26 @@ def test_history_grid_is_dense_and_starts_at_window_start(client, frozen_now):
         assert p["temperature"] is None and p["humidity"] is None
         assert p["pressure"] is None
         assert p["aqi"] is None and p["aqi_lo"] is None and p["aqi_hi"] is None
+        for metric in ("pm25", "pm10", "temperature", "humidity", "pressure"):
+            assert p[metric + "_lo"] is None and p[metric + "_hi"] is None
+
+
+def test_history_metric_lo_hi_bracket_the_bucket_average(client, insert_measurement,
+                                                          frozen_now):
+    """<metric>_lo/_hi — минимум/максимум самой метрики внутри корзины
+    (лента разброса на графике при выборе метрики), не только у PM/AQI."""
+    start, _ = main.period_window(frozen_now, "24h", 0, None)
+    base = start + 2 * 3600
+    insert_measurement(ts=base + 10, temperature=5.0, humidity=40.0, pressure=1000.0)
+    insert_measurement(ts=base + 200, temperature=9.0, humidity=60.0, pressure=1004.0)
+
+    d = client.get("/api/v1/history", params={"period": "24h", "tz_offset": 0}).json()
+    point = next(p for p in d["points"] if p["t"] == base)
+    assert point["temperature_lo"] == 5.0 and point["temperature_hi"] == 9.0
+    assert point["humidity_lo"] == 40.0 and point["humidity_hi"] == 60.0
+    assert point["pressure_lo"] == 1000.0 and point["pressure_hi"] == 1004.0
+    for metric in ("temperature", "humidity", "pressure"):
+        assert point[metric + "_lo"] <= point[metric] <= point[metric + "_hi"]
 
 
 def test_history_measurement_lands_in_its_bucket(client, insert_measurement, frozen_now):
