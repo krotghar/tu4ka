@@ -469,6 +469,8 @@ const METRIC_DEFS = [
   ["Влажность", "humidity", "%", 0, { digits: 0, unit: "%", eps: 1 }, 12],
   ["Давление", "pressure", "гПа", 0, { digits: 0, eps: 0.5 }, 5],
 ];
+/* Карточка, которая встаёт на место активной метрики — клик по ней возвращает AQI. */
+const AQI_DEF = ["AQI", "aqi", "", 0, { eps: 3, worseUp: true }, 10];
 
 const fmt = (v, d = 1) => (v == null ? "—" : Number(v).toFixed(d).replace(".", ","));
 
@@ -654,36 +656,45 @@ function renderDaySummary() {
   ).join("");
 }
 
+function metricCardHtml(pts, [name, key, unit, digits, topts, minSpan], attrs, cardClass) {
+  const raw = sample(pts.map(p => p[key]), 48);
+  const vals = rolling(raw, Math.max(3, Math.round(raw.length / 8)));
+  const nums = vals.filter(v => v != null);
+  let sparkPath = "";
+  if (nums.length) {
+    const min = Math.min(...nums), max = Math.max(...nums);
+    const mid = (min + max) / 2;
+    const half = Math.max((max - min) * 0.65, minSpan / 2) || 1;
+    const lo = mid - half, hi = mid + half;
+    const runs = [];
+    let cur = [];
+    vals.forEach((v, i) => {
+      if (v == null) { if (cur.length) runs.push(cur); cur = []; }
+      else cur.push({ x: i / Math.max(1, vals.length - 1) * 100, y: 22 - (v - lo) / (hi - lo) * 22 });
+    });
+    if (cur.length) runs.push(cur);
+    sparkPath = runs.map(r => smoothPath(r)).join(" ");
+  }
+  const curValue = key === "aqi" ? (current && current.aqi ? current.aqi.aqi : null) : (current ? current[key] : null);
+  const t = trendText(trend(pts, key), topts);
+  return `<div class="metric-card${cardClass}" ${attrs}>` +
+    `<div class="metric-head"><div class="metric-name">${name}</div>` +
+    `<div class="metric-value"><span>${fmt(curValue, digits)}</span><span class="unit">${unit}</span></div></div>` +
+    `<svg class="metric-spark" viewBox="0 0 100 22" preserveAspectRatio="none">` +
+    `<path d="${sparkPath}" fill="none" stroke="${["pm25", "pm10", "aqi"].includes(key) ? "var(--ink)" : "var(--muted)"}" ` +
+    `stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"></path></svg>` +
+    `<div class="metric-trend" style="color:${t.color}">${t.arrow} ${t.text}</div></div>`;
+}
+
 function renderMetrics() {
   const pts = (mainHistory && mainHistory.points) || [];
-  $("#metrics").innerHTML = METRIC_DEFS.map(([name, key, unit, digits, topts, minSpan]) => {
-    const raw = sample(pts.map(p => p[key]), 48);
-    const vals = rolling(raw, Math.max(3, Math.round(raw.length / 8)));
-    const nums = vals.filter(v => v != null);
-    let sparkPath = "";
-    if (nums.length) {
-      const min = Math.min(...nums), max = Math.max(...nums);
-      const mid = (min + max) / 2;
-      const half = Math.max((max - min) * 0.65, minSpan / 2) || 1;
-      const lo = mid - half, hi = mid + half;
-      const runs = [];
-      let cur = [];
-      vals.forEach((v, i) => {
-        if (v == null) { if (cur.length) runs.push(cur); cur = []; }
-        else cur.push({ x: i / Math.max(1, vals.length - 1) * 100, y: 22 - (v - lo) / (hi - lo) * 22 });
-      });
-      if (cur.length) runs.push(cur);
-      sparkPath = runs.map(r => smoothPath(r)).join(" ");
+  $("#metrics").innerHTML = METRIC_DEFS.map(def => {
+    const key = def[1];
+    if (key === activeMetric) {
+      // на месте кликнутой метрики — карточка AQI; клик по ней возвращает всё как было
+      return metricCardHtml(pts, AQI_DEF, `data-metric="${key}" data-role="back"`, " active");
     }
-    const curValue = current ? current[key] : null;
-    const t = trendText(trend(pts, key), topts);
-    return `<div class="metric-card${key === activeMetric ? " active" : ""}" data-metric="${key}">` +
-      `<div class="metric-head"><div class="metric-name">${name}</div>` +
-      `<div class="metric-value"><span>${fmt(curValue, digits)}</span><span class="unit">${unit}</span></div></div>` +
-      `<svg class="metric-spark" viewBox="0 0 100 22" preserveAspectRatio="none">` +
-      `<path d="${sparkPath}" fill="none" stroke="${key === "pm25" || key === "pm10" ? "var(--ink)" : "var(--muted)"}" ` +
-      `stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"></path></svg>` +
-      `<div class="metric-trend" style="color:${t.color}">${t.arrow} ${t.text}</div></div>`;
+    return metricCardHtml(pts, def, `data-metric="${key}"`, "");
   }).join("");
 }
 
@@ -948,8 +959,7 @@ $("#chart-plot").addEventListener("mouseleave", hideTooltip);
 $("#metrics").addEventListener("click", e => {
   const card = e.target.closest(".metric-card");
   if (!card) return;
-  const key = card.dataset.metric;
-  activeMetric = activeMetric === key ? null : key;
+  activeMetric = card.dataset.role === "back" ? null : card.dataset.metric;
   renderChart();
   renderMetrics();
 });
