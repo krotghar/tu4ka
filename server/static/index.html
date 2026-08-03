@@ -220,14 +220,15 @@ button, input { font-family: inherit; }
 .summary-value { margin-left: auto; font-family: var(--font-mono); font-size: 19px; font-weight: 500; letter-spacing: -0.02em; }
 
 /* --- chart card --- */
-.chart-card { padding: 20px 22px 18px; flex: 1; display: flex; flex-direction: column; }
+/* полоса над полем графика, зарезервированная под тултип — он живёт в ней, а не поверх линии */
+.chart-card { padding: 20px 22px 18px; flex: 1; display: flex; flex-direction: column; --tip-space: 72px; }
 .chart-head { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
 .chart-head .u { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
 .tabs { margin-left: auto; display: flex; gap: 2px; border: 1px solid var(--input-line); border-radius: 8px; padding: 2px; }
 .tab { font: inherit; font-size: 12px; padding: 6px 12px; border: 0; border-radius: 6px; cursor: pointer; background: transparent; color: var(--ink-2); }
 .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); font-weight: 600; }
 
-.chart-row { display: flex; gap: 12px; flex: 1; min-height: 240px; }
+.chart-row { display: flex; gap: 12px; flex: 1; min-height: 240px; margin-top: var(--tip-space); }
 .y-axis { width: 30px; align-self: stretch; position: relative; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
 .y-axis .yfix { position: absolute; right: 0; }
 .y-axis .ytop { top: -5px; }
@@ -242,14 +243,14 @@ button, input { font-family: inherit; }
 .chart-empty[hidden] { display: none; }
 .cursor-line { position: absolute; top: 0; bottom: 0; width: 1px; pointer-events: none; background: var(--axis); display: none; }
 .cursor-dot { position: absolute; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--card); pointer-events: none; transform: translate(-50%, -50%); display: none; }
-.tooltip { position: absolute; top: 4px; transform: translateX(-50%); pointer-events: none; background: var(--card);
+/* привязка по bottom, а не по top: коробка стоит над полем графика при любой своей высоте */
+.tooltip { position: absolute; bottom: calc(100% + 8px); transform: translateX(-50%); pointer-events: none; background: var(--card);
   border: 1px solid var(--line-strong); border-radius: 10px; padding: 9px 12px; box-shadow: 0 6px 18px rgba(0,0,0,0.16);
   white-space: nowrap; display: none; }
 .tooltip .tw { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
-.tooltip .ta { display: flex; align-items: baseline; gap: 8px; margin-top: 5px; }
+.tooltip .ta { display: flex; align-items: baseline; gap: 6px; margin-top: 5px; }
 .tooltip .ta .n { font-family: var(--font-mono); font-size: 22px; font-weight: 500; letter-spacing: -0.03em; }
-.tooltip .ta .c { font-size: 12.5px; font-weight: 600; }
-.tooltip .tr, .tooltip .tp { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); margin-top: 4px; }
+.tooltip .ta .u { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
 
 .x-labels { display: flex; justify-content: space-between; margin: 9px 0 0 42px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
 
@@ -368,9 +369,7 @@ footer a { margin-left: auto; }
             <div class="cursor-dot" id="cursor-dot"></div>
             <div class="tooltip" id="tooltip">
               <div class="tw" id="tip-when"></div>
-              <div class="ta"><span class="n" id="tip-aqi"></span><span class="c" id="tip-cat"></span></div>
-              <div class="tr" id="tip-range"></div>
-              <div class="tp" id="tip-pm"></div>
+              <div class="ta"><span class="n" id="tip-val"></span><span class="u" id="tip-unit"></span></div>
             </div>
           </div>
         </div>
@@ -564,9 +563,12 @@ let historyRetry = null;
 let current = null;       // последний ответ /api/v1/current
 let currentAgeAt = 0;
 
-/* геометрия текущего графика — обновляется в renderChart, читается в updateTooltip */
+/* геометрия текущего графика — обновляется в renderChart, читается в updateTooltip.
+   chartVals — сглаженный ряд, по которому нарисована линия; chartYPct — её же вертикальный
+   маппинг. Курсор обязан жить на них, иначе точка промахивается мимо линии. */
 let chartPts = [];
-let chartTop = 100, chartBottom = 0, chartHasBand = false;
+let chartVals = [];
+let chartYPct = null;
 
 function fmtAge(s) {
   if (s < 90) return `${s} с назад`;
@@ -717,6 +719,9 @@ function renderChart() {
 
   hideTooltip();
   if (!hasAny) {
+    chartPts = [];
+    chartVals = [];
+    chartYPct = null;
     empty.hidden = false;
     $("#chart-line").setAttribute("d", "");
     $("#chart-band").setAttribute("d", "");
@@ -734,10 +739,10 @@ function renderChart() {
   const bandAllowed = (isAqi || key === "pm25" || key === "pm10") && period !== "24h";
   const bandEps = isAqi ? 1 : 0.15;
   const hasBand = bandAllowed && pts.some(p => p[key + "_hi"] != null && p[key + "_lo"] != null && p[key + "_hi"] - p[key + "_lo"] > bandEps);
-  chartHasBand = hasBand;
   const hiVals = hasBand ? rolling(rolling(pts.map(p => p[key + "_hi"]), smoothK), smoothK) : null;
   const loVals = hasBand ? rolling(rolling(pts.map(p => p[key + "_lo"]), smoothK), smoothK) : null;
   const midVals = rolling(pts.map(p => p[key]), smoothK);
+  chartVals = midVals;
 
   const nums = arr => arr.filter(v => v != null);
   const dataMax = Math.max(...nums(hasBand ? hiVals : midVals));
@@ -748,12 +753,12 @@ function renderChart() {
   const rawBottom = Math.floor((dataMin - pad) / step) * step;
   const bottom = isAqi ? Math.max(0, rawBottom) : rawBottom;
   const span = top - bottom || 1;
-  chartTop = top;
-  chartBottom = bottom;
 
   const X = i => (n === 1 ? W / 2 : i / (n - 1) * W);
-  const Y = v => Math.max(0.5, Math.min(H - 0.5, H - (v - bottom) / span * H));
-  const yPct = val => ((1 - (val - bottom) / span) * 100).toFixed(2) + "%";
+  // единый вертикальный маппинг: линия, лента, сетка и курсор считают высоту им одним
+  chartYPct = v => Math.max(0.5, Math.min(H - 0.5, H - (v - bottom) / span * H)) / H * 100;
+  const Y = v => chartYPct(v) / 100 * H;
+  const yPct = val => chartYPct(val).toFixed(2) + "%";
 
   // линия по сегментам между пропусками (null-корзины не соединяем)
   function segPath(vals) {
@@ -841,52 +846,43 @@ function updateTooltip(i) {
   const key = activeMetric;
   const isAqi = key === "aqi";
   const selDef = metricDef(key);
-  const val = p[key];
+  // сглаженное значение, а не сырое p[key]: по нему нарисована линия, на неё и садится точка
+  const val = chartVals[i];
   const leftPct = n === 1 ? 50 : i / (n - 1) * 100;
   $("#cursor-line").style.display = "block";
   $("#cursor-line").style.left = leftPct + "%";
+  $("#tip-when").textContent = timeLabel(p.t, period, true);
 
   if (val == null) {
     $("#cursor-dot").style.display = "none";
-    $("#tip-when").textContent = timeLabel(p.t, period, true);
-    $("#tip-aqi").textContent = "—";
-    $("#tip-cat").textContent = "нет данных";
-    $("#tip-range").textContent = "";
-    $("#tip-pm").textContent = "";
+    $("#tip-val").textContent = "—";
+    $("#tip-val").style.color = "";
+    $("#tip-unit").textContent = "нет данных";
     positionTooltip(leftPct);
     return;
   }
-  const span = chartTop - chartBottom || 1;
-  const yPct = ((1 - (val - chartBottom) / span) * 100);
-  const color = metricColor(key);
+  // цвет — от значения под курсором; у AQI это ровно тот стоп градиента, которым закрашена
+  // линия в этой точке, у прочих метрик линия залита ровным metricColor
+  const color = isAqi ? CATS[catKey(val)].line : metricColor(key);
 
   $("#cursor-dot").style.display = "block";
   $("#cursor-dot").style.left = leftPct + "%";
-  $("#cursor-dot").style.top = yPct + "%";
+  $("#cursor-dot").style.top = chartYPct(val) + "%";
   $("#cursor-dot").style.background = color;
-  $("#tip-when").textContent = timeLabel(p.t, period, true);
-  $("#tip-aqi").textContent = isAqi ? Math.round(val) : fmt(val, selDef[3]);
-  $("#tip-aqi").style.color = color;
-  $("#tip-cat").textContent = isAqi ? CATS[catKey(val)].label : selDef[2];
-  // разброс внутри корзины по выбранному показателю; для AQI — запасной вариант PM2.5, если ленты нет
-  $("#tip-range").textContent = isAqi
-    ? (chartHasBand && p.aqi_hi != null && p.aqi_lo != null
-        ? `диапазон ${Math.round(p.aqi_lo)}–${Math.round(p.aqi_hi)}`
-        : (p.pm25 != null ? `PM2.5 ${fmt(p.pm25)}` : ""))
-    : (chartHasBand && p[key + "_lo"] != null && p[key + "_hi"] != null
-        ? `диапазон ${fmt(p[key + "_lo"], selDef[3])}–${fmt(p[key + "_hi"], selDef[3])}`
-        : "");
-  // у AQI вторая строка — PM2.5/PM10, у прочих метрик — сам AQI как контекст
-  $("#tip-pm").textContent = isAqi
-    ? ((p.pm25 != null || p.pm10 != null) ? `PM2.5 ${fmt(p.pm25)} · PM10 ${fmt(p.pm10, 0)}` : "")
-    : (p.aqi != null ? `AQI ${Math.round(p.aqi)}` : "");
+  $("#tip-val").textContent = isAqi ? Math.round(val) : fmt(val, selDef[3]);
+  $("#tip-val").style.color = color;
+  $("#tip-unit").textContent = selDef[2];
   positionTooltip(leftPct);
 }
 
 function positionTooltip(leftPct) {
   const tip = $("#tooltip");
   tip.style.display = "block";
-  tip.style.left = Math.min(84, Math.max(16, leftPct)) + "%";
+  // зажим по реальной ширине коробки: у краёв не вылезаем, в середине стоим ровно под курсором
+  const plotW = $("#chart-plot").clientWidth;
+  const half = tip.offsetWidth / 2;
+  const x = Math.max(half, Math.min(plotW - half, leftPct / 100 * plotW));
+  tip.style.left = x + "px";
 }
 
 async function loadCurrent() {
