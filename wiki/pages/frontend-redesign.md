@@ -31,6 +31,13 @@ dashboard and switch history to sliding windows».
   `/api/v1/current` и `/api/v1/history`, как и раньше тренды.
 - Тёмная/светлая тема — по-прежнему `prefers-color-scheme`, не поменялось.
 
+## Что было дальше
+
+Редизайн на этом не закончился — большой график перестал быть графиком
+только AQI и стал переключаться кликом по карточкам метрик (их стало шесть,
+AQI среди них). Устройство, таблица шагов осей и источник макета —
+[dashboard-metric-selector](dashboard-metric-selector.md).
+
 ## Источники
 
 - Матчасть из [CLAUDE.md](../../CLAUDE.md).

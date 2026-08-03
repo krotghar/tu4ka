@@ -10,7 +10,8 @@
 - [protocol-airrohr-push](pages/protocol-airrohr-push.md) — формат `POST /api/v1/push`, маппинг полей, авторизация датчика
 - [aqi-nowcast](pages/aqi-nowcast.md) — breakpoints EPA AQI, NowCast vs мгновенный AQI (+ lo/hi разброс), открытый TODO по источнику
 - [history-buckets](pages/history-buckets.md) — скользящие окна `/history`, почему корзины привязаны к tz-сдвинутой сетке, а не к эпохе; `aqi_lo`/`_hi` и `<метрика>_lo`/`_hi` для ленты разброса
-- [frontend-redesign](pages/frontend-redesign.md) — редизайн дашборда: свой SVG вместо Chart.js, вендоренные шрифты, скользящие окна, цвет по метрике и лента разброса на графике
+- [frontend-redesign](pages/frontend-redesign.md) — редизайн дашборда: свой SVG вместо Chart.js, вендоренные шрифты, скользящие окна
+- [dashboard-metric-selector](pages/dashboard-metric-selector.md) — шесть карточек и один график: `METRIC_DEFS`, шаги осей, цвет и лента разброса по метрике, откуда берётся макет
 - [deploy-cicd](pages/deploy-cicd.md) — VPS, systemd, автодеплой через CI, ключ деплоя
 
 ## Roadmap/решения
@@ -19,6 +20,13 @@
 
 ## Внешние источники
 
-Пока пусто — сюда попадут страницы по внешним материалам (AirNow TAD,
-документация sensor.community и т.п.) после того, как соответствующие raw
-источники появятся в `wiki/raw/` и будут заингестены.
+`wiki/raw/` пока пуст — сюда попадут страницы по внешним материалам (AirNow
+TAD, документация sensor.community и т.п.), когда соответствующие источники
+будут туда положены и заингестены.
+
+Отдельно стоит помнить про два источника правды **вне репозитория**:
+
+- макет дашборда — проект Claude Design «Дизайн датчика качества воздуха»
+  (см. [dashboard-metric-selector](pages/dashboard-metric-selector.md));
+- breakpoints AQI — таблица AirNow (EPA), редакция 2024
+  (см. [aqi-nowcast](pages/aqi-nowcast.md)).
