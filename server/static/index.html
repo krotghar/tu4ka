@@ -223,6 +223,7 @@ button, input { font-family: inherit; }
 .chart-card { padding: 20px 22px 18px; flex: 1; display: flex; flex-direction: column; }
 .chart-head { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
 .chart-head .u { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.chart-head h2 { cursor: pointer; }
 .tabs { margin-left: auto; display: flex; gap: 2px; border: 1px solid var(--input-line); border-radius: 8px; padding: 2px; }
 .tab { font: inherit; font-size: 12px; padding: 6px 12px; border: 0; border-radius: 6px; cursor: pointer; background: transparent; color: var(--ink-2); }
 .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); font-weight: 600; }
@@ -255,7 +256,8 @@ button, input { font-family: inherit; }
 
 /* --- metrics row --- */
 .metrics-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
-.metric-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 15px 12px; }
+.metric-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 15px 12px; cursor: pointer; transition: border-color .15s, background-color .15s; }
+.metric-card.active { border-color: var(--ink); background: var(--track); }
 .metric-name { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .metric-value { display: flex; align-items: baseline; gap: 4px; margin-top: 8px; font-family: var(--font-mono); font-size: 22px; font-weight: 500; letter-spacing: -0.03em; }
 .metric-value .unit { font-family: var(--font-sans); font-size: 11px; color: var(--muted); font-weight: 400; }
@@ -346,7 +348,7 @@ footer a { margin-left: auto; }
     <div class="col-right">
       <div class="card chart-card">
         <div class="chart-head">
-          <h2>AQI</h2>
+          <h2 id="chart-title" title="Показать AQI">AQI</h2>
           <span class="u" id="period-note"></span>
           <div class="tabs" id="tabs" role="group" aria-label="Период"></div>
         </div>
@@ -531,6 +533,7 @@ function timeLabel(tSec, period, full) {
 
 /* --- состояние --- */
 let period = "24h";
+let activeMetric = null;  // null = график AQI, иначе ключ метрики (pm25, pm10, ...)
 let mainHistory = null;   // /history для выбранного периода
 let dayHistory = null;    // /history?period=24h — всегда, для «худших часов» и сводки
 let historyGen = 0;
@@ -662,7 +665,7 @@ function renderMetrics() {
     }
     const curValue = current ? current[key] : null;
     const t = trendText(trend(pts, key), topts);
-    return `<div class="metric-card">` +
+    return `<div class="metric-card${key === activeMetric ? " active" : ""}" data-metric="${key}">` +
       `<div class="metric-head"><div class="metric-name">${name}</div>` +
       `<div class="metric-value"><span>${fmt(curValue, digits)}</span><span class="unit">${unit}</span></div></div>` +
       `<svg class="metric-spark" viewBox="0 0 100 22" preserveAspectRatio="none">` +
@@ -673,11 +676,15 @@ function renderMetrics() {
 }
 
 function renderChart() {
+  const key = activeMetric;
+  const metricDef = key ? METRIC_DEFS.find(m => m[1] === key) : null;
   const pts = (mainHistory && mainHistory.points) || [];
   chartPts = pts;
   const n = pts.length;
   const empty = $("#chart-empty");
-  const hasAny = pts.some(p => p.aqi != null);
+  const hasAny = pts.some(p => (key ? p[key] : p.aqi) != null);
+  $("#chart-title").textContent = metricDef ? metricDef[0] : "AQI";
+  $("#chart-title").title = key ? "Вернуться к AQI" : "AQI";
   $("#period-note").textContent = (PERIODS.find(p => p.key === period) || PERIODS[0]).note;
 
   hideTooltip();
@@ -694,11 +701,12 @@ function renderChart() {
 
   const W = 1000, H = 300;
   const smoothK = Math.max(3, Math.round(n / 12));
-  const hasBand = pts.some(p => p.aqi_hi != null && p.aqi_lo != null && p.aqi_hi - p.aqi_lo > 1);
+  const hasBand = !key && pts.some(p => p.aqi_hi != null && p.aqi_lo != null && p.aqi_hi - p.aqi_lo > 1);
   chartHasBand = hasBand;
   const hiVals = hasBand ? rolling(rolling(pts.map(p => p.aqi_hi), smoothK), smoothK) : null;
   const loVals = hasBand ? rolling(rolling(pts.map(p => p.aqi_lo), smoothK), smoothK) : null;
-  const midVals = hasBand ? rolling(pts.map(p => p.aqi), smoothK) : pts.map(p => p.aqi);
+  const rawVals = pts.map(p => (key ? p[key] : p.aqi));
+  const midVals = (hasBand || key) ? rolling(rawVals, smoothK) : rawVals;
 
   const nums = arr => arr.filter(v => v != null);
   const dataMax = Math.max(...nums(hasBand ? hiVals : midVals));
@@ -744,36 +752,45 @@ function renderChart() {
   $("#chart-line").setAttribute("d", segPath(midVals));
   $("#chart-band").setAttribute("d", hasBand ? bandPathOf(hiVals, loVals) : "");
 
-  // цветовой градиент линии — по категории значения в каждой точке
-  const stops = [];
-  let prevStop = null;
-  midVals.forEach((v, i) => {
-    if (v == null) return;
-    const c = CATS[catKey(v)].line;
-    const off = (n === 1 ? 0 : i / (n - 1) * 100).toFixed(2) + "%";
-    if (!prevStop) stops.push({ o: "0%", c });
-    else if (c !== prevStop.c) { stops.push({ o: off, c: prevStop.c }); stops.push({ o: off, c }); }
-    prevStop = { c, off };
-  });
-  if (prevStop) stops.push({ o: "100%", c: prevStop.c });
-  const grad = $("#aqiGrad");
-  grad.innerHTML = stops.map(s => `<stop offset="${s.o}" stop-color="${s.c}"></stop>`).join("");
+  if (key) {
+    // одна метрика — сплошная линия, без категорийного градиента
+    $("#chart-line").setAttribute("stroke", "var(--ink-2)");
+  } else {
+    // цветовой градиент линии — по категории значения в каждой точке
+    $("#chart-line").setAttribute("stroke", "url(#aqiGrad)");
+    const stops = [];
+    let prevStop = null;
+    midVals.forEach((v, i) => {
+      if (v == null) return;
+      const c = CATS[catKey(v)].line;
+      const off = (n === 1 ? 0 : i / (n - 1) * 100).toFixed(2) + "%";
+      if (!prevStop) stops.push({ o: "0%", c });
+      else if (c !== prevStop.c) { stops.push({ o: off, c: prevStop.c }); stops.push({ o: off, c }); }
+      prevStop = { c, off };
+    });
+    if (prevStop) stops.push({ o: "100%", c: prevStop.c });
+    const grad = $("#aqiGrad");
+    grad.innerHTML = stops.map(s => `<stop offset="${s.o}" stop-color="${s.c}"></stop>`).join("");
+  }
 
   // сетка Y
-  const gridVals = [25, 50, 75, 100, 150, 200, 300].filter(v => v > bottom + span * 0.06 && v < top - span * 0.06);
+  const gridVals = key
+    ? [0.25, 0.5, 0.75].map(f => bottom + span * f).filter(v => v > bottom + span * 0.06 && v < top - span * 0.06)
+    : [25, 50, 75, 100, 150, 200, 300].filter(v => v > bottom + span * 0.06 && v < top - span * 0.06);
   document.querySelectorAll(".gridline").forEach(el => el.remove());
   const plot = $("#chart-plot");
   for (const v of gridVals) {
     const el = document.createElement("div");
     el.className = "gridline";
     el.style.top = yPct(v);
-    el.style.borderColor = CATS[catKey(v)].line;
+    el.style.borderColor = key ? "var(--axis)" : CATS[catKey(v)].line;
     plot.insertBefore(el, plot.firstChild);
   }
+  const gridLabel = v => key ? fmt(v, metricDef[3]) : v;
   $("#y-axis").innerHTML =
-    `<span class="yfix ytop">${top}</span>` +
-    gridVals.map(v => `<span class="gridlabel" style="top:${yPct(v)}">${v}</span>`).join("") +
-    `<span class="yfix ybottom">${bottom}</span>`;
+    `<span class="yfix ytop">${gridLabel(top)}</span>` +
+    gridVals.map(v => `<span class="gridlabel" style="top:${yPct(v)}">${gridLabel(v)}</span>`).join("") +
+    `<span class="yfix ybottom">${gridLabel(bottom)}</span>`;
 
   // подписи оси X
   const xs = [0, 0.25, 0.5, 0.75, 1].map(f => timeLabel(pts[Math.min(n - 1, Math.round(f * (n - 1)))].t, period));
@@ -791,11 +808,13 @@ function updateTooltip(i) {
   if (!n) return;
   i = Math.max(0, Math.min(n - 1, i));
   const p = chartPts[i];
+  const key = activeMetric;
+  const val = key ? p[key] : p.aqi;
   const leftPct = n === 1 ? 50 : i / (n - 1) * 100;
   $("#cursor-line").style.display = "block";
   $("#cursor-line").style.left = leftPct + "%";
 
-  if (p.aqi == null) {
+  if (val == null) {
     $("#cursor-dot").style.display = "none";
     $("#tip-when").textContent = timeLabel(p.t, period, true);
     $("#tip-aqi").textContent = "—";
@@ -806,16 +825,33 @@ function updateTooltip(i) {
     return;
   }
   const span = chartTop - chartBottom || 1;
-  const yPct = ((1 - (p.aqi - chartBottom) / span) * 100);
-  const color = CATS[catKey(p.aqi)].line;
+  const yPct = ((1 - (val - chartBottom) / span) * 100);
+
+  if (key) {
+    const metricDef = METRIC_DEFS.find(m => m[1] === key);
+    const color = "var(--ink-2)";
+    $("#cursor-dot").style.display = "block";
+    $("#cursor-dot").style.left = leftPct + "%";
+    $("#cursor-dot").style.top = yPct + "%";
+    $("#cursor-dot").style.background = color;
+    $("#tip-when").textContent = timeLabel(p.t, period, true);
+    $("#tip-aqi").textContent = fmt(val, metricDef[3]);
+    $("#tip-aqi").style.color = color;
+    $("#tip-cat").textContent = metricDef[2];
+    $("#tip-range").textContent = "";
+    $("#tip-pm").textContent = "";
+    positionTooltip(leftPct);
+    return;
+  }
+  const color = CATS[catKey(val)].line;
   $("#cursor-dot").style.display = "block";
   $("#cursor-dot").style.left = leftPct + "%";
   $("#cursor-dot").style.top = yPct + "%";
   $("#cursor-dot").style.background = color;
   $("#tip-when").textContent = timeLabel(p.t, period, true);
-  $("#tip-aqi").textContent = Math.round(p.aqi);
+  $("#tip-aqi").textContent = Math.round(val);
   $("#tip-aqi").style.color = color;
-  $("#tip-cat").textContent = CATS[catKey(p.aqi)].label;
+  $("#tip-cat").textContent = CATS[catKey(val)].label;
   $("#tip-range").textContent = chartHasBand && p.aqi_hi != null && p.aqi_lo != null
     ? `диапазон ${Math.round(p.aqi_lo)}–${Math.round(p.aqi_hi)}`
     : (p.pm25 != null ? `PM2.5 ${fmt(p.pm25)}` : "");
@@ -894,6 +930,20 @@ $("#chart-plot").addEventListener("mousemove", e => {
   updateTooltip(Math.round(frac * (chartPts.length - 1)));
 });
 $("#chart-plot").addEventListener("mouseleave", hideTooltip);
+
+$("#metrics").addEventListener("click", e => {
+  const card = e.target.closest(".metric-card");
+  if (!card) return;
+  activeMetric = card.dataset.metric;
+  renderChart();
+  renderMetrics();
+});
+$("#chart-title").addEventListener("click", () => {
+  if (activeMetric == null) return;
+  activeMetric = null;
+  renderChart();
+  renderMetrics();
+});
 
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { renderChart(); renderMetrics(); });
 
