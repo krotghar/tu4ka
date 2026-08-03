@@ -3,6 +3,9 @@ name: CI/CD
 on:
   push:
     branches: [main]
+    paths-ignore:            # правки без кода/тестов не требуют прогона и деплоя
+      - '**.md'
+      - '.gitignore'
   workflow_dispatch:          # ручной перезапуск деплоя из вкладки Actions
 
 permissions:
