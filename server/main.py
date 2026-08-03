@@ -13,7 +13,6 @@ import secrets
 import sqlite3
 import time
 from contextlib import asynccontextmanager, closing
-from datetime import datetime, timedelta, timezone
 
 import anyio
 from fastapi import FastAPI, HTTPException, Request
@@ -59,10 +58,12 @@ FIELD_MAP = {
     "signal": "signal",
 }
 
-PERIODS = {  # период истории -> шаг усреднения, сек
-    "day": 300,
-    "week": 1800,
-    "month": 7200,
+PERIODS = {  # период истории -> (длина скользящего окна, сек; None = вся история; шаг корзины, сек)
+    "24h": (24 * 3600, 3600),
+    "7d": (7 * 86400, 3 * 3600),
+    "30d": (30 * 86400, 86400),
+    "12m": (364 * 86400, 2 * 86400),
+    "all": (None, 15 * 86400),
 }
 MAX_TZ_OFFSET = 14 * 60  # минут; реальные зоны укладываются в UTC-12..UTC+14
 
@@ -214,32 +215,45 @@ def current():
     return d
 
 
-def period_start(now: int, period: str, tz_offset: int) -> int:
-    """Начало календарных суток / недели / месяца, epoch-секунды.
+def period_window(now: int, period: str, tz_offset: int, first_ts: int | None) -> tuple[int, int]:
+    """Границы скользящего окна, выровненные по сетке корзины.
 
     tz_offset — часовой пояс клиента: минут к востоку от UTC, то есть
-    -Date.prototype.getTimezoneOffset() браузера. Календарные границы считаем
-    в этом поясе, иначе «начало суток» приедет в середину местного дня.
+    -Date.prototype.getTimezoneOffset() браузера. Сетка корзин сдвинута на
+    tz_offset, чтобы суточные и более крупные корзины (30d, 12m, all) стояли
+    на местных полуночах, а не на границах UTC-суток.
+
+    end — начало корзины, в которую попадает `now` (эта корзина обычно ещё не
+    заполнена целиком). Для окон фиксированной длины start = end - span; для
+    "all" — начало корзины, в которую попадает первое измерение (first_ts),
+    либо end, если измерений ещё нет.
     """
+    span, bucket = PERIODS[period]
     shift = tz_offset * 60
-    local = datetime.fromtimestamp(now + shift, tz=timezone.utc)
-    start = local.replace(hour=0, minute=0, second=0, microsecond=0)
-    if period == "week":
-        start -= timedelta(days=start.weekday())  # неделя с понедельника
-    elif period == "month":
-        start = start.replace(day=1)
-    return int(start.timestamp()) - shift
+    end = ((now + shift) // bucket) * bucket - shift
+    if span is not None:
+        start = end - span
+    elif first_ts is None:
+        start = end
+    else:
+        start = ((first_ts + shift) // bucket) * bucket - shift
+    return start, end
 
 
 @app.get("/api/v1/history")
-def history(period: str = "day", tz_offset: int = 0):
-    """История с начала календарных суток / недели / месяца.
+def history(period: str = "24h", tz_offset: int = 0):
+    """История за скользящее окно: 24h / 7d / 30d / 12m / all.
 
-    Усреднение по корзинам: day (5 мин), week (30 мин), month (2 ч). Корзины
-    отсчитываются от начала периода, поэтому первая всегда полная — иначе она
-    собиралась бы из пары измерений и давала выброс в начале графика.
+    Усреднение по корзинам: 24h (1 ч), 7d (3 ч), 30d (1 сутки), 12m (2 суток),
+    all (15 суток). Корзины выровнены по фиксированной сетке (см. period_window),
+    а не по границе окна — иначе сетка съезжала бы на каждый запрос вместе с `now`.
     Сетка плотная: корзины без измерений отдаются с null и n=0, чтобы график
-    занимал период целиком, даже когда данных за его начало нет.
+    занимал окно целиком, даже когда данных за его начало нет.
+
+    aqi — мгновенный AQI по средним PM корзины; aqi_lo/aqi_hi — по минимуму и
+    максимуму PM внутри корзины (диапазон для ленты на графике). aqi_hi точен
+    (sub-index монотонен по концентрации), aqi_lo — нижняя оценка: реальный
+    минимум max(pm25_aqi, pm10_aqi) внутри корзины может быть чуть выше.
     """
     if period not in PERIODS:
         raise HTTPException(status_code=400,
@@ -248,23 +262,29 @@ def history(period: str = "day", tz_offset: int = 0):
         raise HTTPException(
             status_code=400,
             detail=f"tz_offset must be within ±{MAX_TZ_OFFSET} minutes")
-    bucket = PERIODS[period]
+    bucket = PERIODS[period][1]
     now = int(time.time())
-    start = period_start(now, period, tz_offset)
     with closing(db()) as conn:
+        first_ts = conn.execute("SELECT min(ts) AS ts FROM measurements").fetchone()["ts"]
+        start, end = period_window(now, period, tz_offset, first_ts)
         rows = conn.execute(
             "SELECT ?+((ts-?)/?)*? AS t, round(avg(pm25),2) AS pm25,"
             " round(avg(pm10),2) AS pm10, round(avg(temperature),2) AS temperature,"
             " round(avg(humidity),2) AS humidity, round(avg(pressure),2) AS pressure,"
+            " min(pm25) AS pm25_lo, max(pm25) AS pm25_hi,"
+            " min(pm10) AS pm10_lo, max(pm10) AS pm10_hi,"
             " count(*) AS n FROM measurements WHERE ts >= ? GROUP BY t ORDER BY t",
             (start, start, bucket, bucket, start),
         ).fetchall()
     by_t = {r["t"]: dict(r) for r in rows}
     points = []
-    for t in range(start, now + 1, bucket):
+    for t in range(start, end + 1, bucket):
         p = by_t.get(t) or {"t": t, "pm25": None, "pm10": None, "temperature": None,
-                            "humidity": None, "pressure": None, "n": 0}
+                            "humidity": None, "pressure": None, "n": 0,
+                            "pm25_lo": None, "pm25_hi": None, "pm10_lo": None, "pm10_hi": None}
         p["aqi"] = aqi.compute(p["pm25"], p["pm10"])["aqi"]  # мгновенный AQI корзины
+        p["aqi_lo"] = aqi.compute(p.pop("pm25_lo"), p.pop("pm10_lo"))["aqi"]
+        p["aqi_hi"] = aqi.compute(p.pop("pm25_hi"), p.pop("pm10_hi"))["aqi"]
         points.append(p)
     return {"period": period, "bucket_s": bucket, "start": start, "end": now,
             "points": points}

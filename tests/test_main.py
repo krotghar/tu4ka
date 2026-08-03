@@ -43,58 +43,69 @@ def _push_body(**values):
 
 
 # --------------------------------------------------------------------------
-# period_start — чистая функция, тестируем без HTTP
+# period_window — чистая функция, тестируем без HTTP
 # --------------------------------------------------------------------------
 
-def test_period_start_day_utc():
-    """Сутки в UTC: начало — полночь того же дня."""
-    assert main.period_start(_ts(2026, 3, 11, 15, 20), "day", 0) == _ts(2026, 3, 11)
+def test_period_window_end_is_floor_of_now_to_bucket():
+    """end — начало корзины, в которую попадает now (обычно ещё не полной),
+    а не now дословно. 24h: bucket=1ч, 15:20 -> корзина с 15:00."""
+    start, end = main.period_window(NOW, "24h", 0, None)
+    assert end == _ts(2026, 3, 11, 15, 0)
+    assert start == end - 24 * 3600
 
 
-def test_period_start_day_positive_offset():
-    """UTC+3: 00:30 UTC — это уже 03:30 по клиенту, значит сутки начались
-    в 00:00 местных, то есть 2026-03-10 21:00 UTC."""
-    now = _ts(2026, 3, 11, 0, 30)
-    assert main.period_start(now, "day", 180) == _ts(2026, 3, 10, 21, 0)
+def test_period_window_span_is_end_minus_span():
+    """Для окна фиксированной длины start = end - span, счёт не от эпохи."""
+    start, end = main.period_window(NOW, "7d", 0, None)
+    assert end == _ts(2026, 3, 11, 15, 0)
+    assert start == end - 7 * 86400
 
 
-def test_period_start_day_negative_offset():
-    """UTC-5: 02:00 UTC — это ещё 21:00 предыдущего дня по клиенту, значит
-    местные сутки начались в 2026-03-10 00:00 местных = 05:00 UTC."""
-    now = _ts(2026, 3, 11, 2, 0)
-    assert main.period_start(now, "day", -300) == _ts(2026, 3, 10, 5, 0)
+def test_period_window_offset_shifts_hourly_grid():
+    """tz_offset двигает сетку и для часовых корзин, не только суточных:
+    +90 и -90 мин одинаково уводят границу с :00 на :30 (симметрично
+    относительно 15:20, поэтому оба смещения дают один и тот же результат)."""
+    start_pos, end_pos = main.period_window(NOW, "24h", 90, None)
+    start_neg, end_neg = main.period_window(NOW, "24h", -90, None)
+    assert end_pos == end_neg == _ts(2026, 3, 11, 14, 30)
+    assert start_pos == end_pos - 24 * 3600
 
 
-def test_period_start_week_from_monday():
-    """Неделя отсчитывается от понедельника: среда 11-го -> понедельник 9-е."""
-    now = _ts(2026, 3, 11, 15, 20)
-    assert main.period_start(now, "week", 0) == _ts(2026, 3, 9)
+@pytest.mark.parametrize("tz_offset,expected_start,expected_end", [
+    (0, (2026, 2, 9, 0, 0), (2026, 3, 11, 0, 0)),
+    (180, (2026, 2, 8, 21, 0), (2026, 3, 10, 21, 0)),
+    (-300, (2026, 2, 9, 5, 0), (2026, 3, 11, 5, 0)),
+])
+def test_period_window_offset_shifts_daily_grid(tz_offset, expected_start, expected_end):
+    """30d: bucket суточный, tz_offset ставит сетку на местную полночь,
+    а не на полночь UTC."""
+    start, end = main.period_window(NOW, "30d", tz_offset, None)
+    assert start == _ts(*expected_start)
+    assert end == _ts(*expected_end)
 
 
-def test_period_start_week_with_offset_crosses_day():
-    """UTC-5: 2026-03-09 01:00 UTC — по клиенту ещё воскресенье 8-е, значит
-    неделя началась в понедельник 2-го (00:00 местных = 05:00 UTC)."""
-    now = _ts(2026, 3, 9, 1, 0)
-    assert main.period_start(now, "week", -300) == _ts(2026, 3, 2, 5, 0)
+def test_period_window_all_starts_at_first_measurement_bucket():
+    """all: начало — корзина, в которую попадает первое измерение, а не эпоха."""
+    first_ts = _ts(2025, 6, 15, 10, 0)
+    start, end = main.period_window(NOW, "all", 0, first_ts)
+    bucket = main.PERIODS["all"][1]
+    assert start <= first_ts < start + bucket
+    assert start % bucket == 0
 
 
-def test_period_start_month():
-    """Месяц: первое число, полночь."""
-    assert main.period_start(_ts(2026, 3, 11, 15, 20), "month", 0) == _ts(2026, 3, 1)
-
-
-def test_period_start_month_with_offset_crosses_month():
-    """UTC+3: 2026-03-01 01:00 UTC — по клиенту уже 1 марта 04:00, месяц
-    начался в 00:00 местных = 2026-02-28 21:00 UTC."""
-    now = _ts(2026, 3, 1, 1, 0)
-    assert main.period_start(now, "month", 180) == _ts(2026, 2, 28, 21, 0)
+def test_period_window_all_with_no_data_start_equals_end():
+    """all и БД пуста (first_ts=None) — окно вырождается в одну точку."""
+    start, end = main.period_window(NOW, "all", 0, None)
+    assert start == end
 
 
 @pytest.mark.parametrize("period", sorted(main.PERIODS))
 @pytest.mark.parametrize("tz_offset", [-840, -300, 0, 180, 840])
-def test_period_start_never_in_future(period, tz_offset):
-    """Начало периода не может оказаться позже текущего момента."""
-    assert main.period_start(NOW, period, tz_offset) <= NOW
+def test_period_window_never_in_future(period, tz_offset):
+    """Конец окна не может оказаться позже текущего момента, начало — не позже конца."""
+    start, end = main.period_window(NOW, period, tz_offset, None)
+    assert end <= NOW
+    assert start <= end
 
 
 # --------------------------------------------------------------------------
@@ -447,7 +458,10 @@ def test_history_rejects_unknown_period(client):
     assert "period must be one of" in r.json()["detail"]
 
 
-@pytest.mark.parametrize("period,bucket", [("day", 300), ("week", 1800), ("month", 7200)])
+@pytest.mark.parametrize("period,bucket", [
+    ("24h", 3600), ("7d", 3 * 3600), ("30d", 86400),
+    ("12m", 2 * 86400), ("all", 15 * 86400),
+])
 def test_history_bucket_per_period(client, period, bucket):
     d = client.get("/api/v1/history", params={"period": period}).json()
     assert d["period"] == period
@@ -459,44 +473,48 @@ def test_history_bucket_per_period(client, period, bucket):
 ])
 def test_history_tz_offset_bounds(client, tz_offset, status):
     """MAX_TZ_OFFSET = ±840 минут, границы включены."""
-    r = client.get("/api/v1/history", params={"period": "day", "tz_offset": tz_offset})
+    r = client.get("/api/v1/history", params={"period": "24h", "tz_offset": tz_offset})
     assert r.status_code == status
 
 
-@pytest.mark.parametrize("tz_offset,expected_start", [
-    (0, (2026, 3, 11, 0, 0)),
-    (180, (2026, 3, 10, 21, 0)),     # UTC+3: сутки клиента начались вчера в 21:00 UTC
-    (-300, (2026, 3, 11, 5, 0)),     # UTC-5: и закончатся позже, чем сутки UTC
+@pytest.mark.parametrize("tz_offset,expected_start,expected_end", [
+    (0, (2026, 2, 9, 0, 0), (2026, 3, 11, 0, 0)),
+    (180, (2026, 2, 8, 21, 0), (2026, 3, 10, 21, 0)),
+    (-300, (2026, 2, 9, 5, 0), (2026, 3, 11, 5, 0)),
 ])
-def test_history_start_follows_tz_offset(client, frozen_now, tz_offset, expected_start):
-    """tz_offset должен доезжать до границы периода, а не только валидироваться.
+def test_history_start_follows_tz_offset(client, frozen_now, tz_offset,
+                                         expected_start, expected_end):
+    """tz_offset должен доезжать до сетки корзин, а не только валидироваться.
 
-    Ожидания — литералы, посчитанные вручную (те же, что в тестах period_start),
-    а не вызов main.period_start: иначе тест повторил бы реализацию и не заметил,
+    30d выбран специально: у него суточная корзина, поэтому сдвиг пояса
+    сразу виден на start/end (в отличие от 24h/7d, где сетка часовая и
+    смещение на целое число часов её не меняет). Ожидания — литералы, а не
+    вызов main.period_window: иначе тест повторил бы реализацию и не заметил,
     если бы history перестала передавать пояс дальше.
     """
     d = client.get("/api/v1/history",
-                   params={"period": "day", "tz_offset": tz_offset}).json()
+                   params={"period": "30d", "tz_offset": tz_offset}).json()
     assert d["start"] == _ts(*expected_start)
 
 
-def test_history_buckets_are_anchored_to_period_start_not_epoch(
+def test_history_buckets_are_anchored_to_tz_shifted_grid_not_epoch(
         client, insert_measurement, frozen_now):
-    """Корзины отсчитываются от начала периода, а не от эпохи (CLAUDE.md).
+    """Корзины отсчитываются от сетки period_window (сдвинутой на tz_offset),
+    а не от эпохи.
 
-    Кейс подобран так, чтобы две привязки расходились: period=month с
-    tz_offset=330 (Индия, UTC+5:30) даёт start = 2026-02-28 18:30 UTC, а это
-    не кратно корзине месяца в 7200 с. При эпохальной привязке измерение
-    получило бы t, которого нет в сетке range(start, now+1, 7200), и молча
-    пропало бы из выдачи.
+    Кейс подобран так, чтобы две привязки расходились: period=30d с
+    tz_offset=330 (Индия, UTC+5:30) даёт start, который не кратен 86400
+    (сетке от эпохи). При эпохальной привязке измерение получило бы t,
+    которого нет в сетке range(start, end+1, bucket), и молча пропало бы
+    из выдачи.
     """
-    start = main.period_start(frozen_now, "month", 330)
-    assert start == _ts(2026, 2, 28, 18, 30)
-    assert start % 7200 == 1800, "кейс бесполезен: сетки совпали, расхождение не поймать"
+    start, end = main.period_window(frozen_now, "30d", 330, None)
+    assert start == _ts(2026, 2, 8, 18, 30)
+    assert start % 86400 != 0, "кейс бесполезен: сетки совпали, расхождение не поймать"
 
     insert_measurement(ts=start + 100, pm25=10.0, pm10=20.0)
     d = client.get("/api/v1/history",
-                   params={"period": "month", "tz_offset": 330}).json()
+                   params={"period": "30d", "tz_offset": 330}).json()
 
     assert d["start"] == start
     assert d["points"][0]["t"] == start
@@ -505,35 +523,34 @@ def test_history_buckets_are_anchored_to_period_start_not_epoch(
     assert first["pm25"] == 10.0
 
 
-def test_history_grid_is_dense_and_starts_at_period_start(client, frozen_now):
-    """Сетка плотная: от period_start ровным шагом bucket_s, пустые корзины
-    приходят с n=0 и null-метриками."""
-    d = client.get("/api/v1/history", params={"period": "day", "tz_offset": 0}).json()
+def test_history_grid_is_dense_and_starts_at_window_start(client, frozen_now):
+    """Сетка плотная: от start ровным шагом bucket_s, пустые корзины
+    приходят с n=0, null-метриками и null aqi/aqi_lo/aqi_hi."""
+    d = client.get("/api/v1/history", params={"period": "24h", "tz_offset": 0}).json()
 
-    start = main.period_start(frozen_now, "day", 0)
-    assert d["start"] == start == _ts(2026, 3, 11)
+    start, end = main.period_window(frozen_now, "24h", 0, None)
+    assert d["start"] == start == _ts(2026, 3, 10, 15, 0)
     assert d["end"] == frozen_now
 
     points = d["points"]
     assert points[0]["t"] == start
-    assert [p["t"] for p in points] == list(range(start, frozen_now + 1, 300))
-    # 15:20 от полуночи — ровно 184 полных корзины по 5 минут плюс нулевая
-    assert len(points) == 185
+    assert [p["t"] for p in points] == list(range(start, end + 1, 3600))
+    assert len(points) == 25
     for p in points:
         assert p["n"] == 0
         assert p["pm25"] is None and p["pm10"] is None
         assert p["temperature"] is None and p["humidity"] is None
         assert p["pressure"] is None
-        assert p["aqi"] is None
+        assert p["aqi"] is None and p["aqi_lo"] is None and p["aqi_hi"] is None
 
 
 def test_history_measurement_lands_in_its_bucket(client, insert_measurement, frozen_now):
-    start = main.period_start(frozen_now, "day", 0)
-    ts = start + 3600 + 100  # 01:01:40 — середина корзины, начинающейся в 01:00
+    start, _ = main.period_window(frozen_now, "24h", 0, None)
+    ts = start + 3600 + 100  # середина второй корзины (часовой)
     insert_measurement(ts=ts, pm25=10.0, pm10=20.0, temperature=5.5)
 
-    d = client.get("/api/v1/history", params={"period": "day", "tz_offset": 0}).json()
-    expected_t = start + ((ts - start) // 300) * 300
+    d = client.get("/api/v1/history", params={"period": "24h", "tz_offset": 0}).json()
+    expected_t = start + ((ts - start) // 3600) * 3600
     assert expected_t == start + 3600
 
     filled = [p for p in d["points"] if p["n"] > 0]
@@ -543,86 +560,120 @@ def test_history_measurement_lands_in_its_bucket(client, insert_measurement, fro
     assert filled[0]["pm10"] == 20.0
     assert filled[0]["temperature"] == 5.5
     # мгновенный AQI корзины: pm25=10 доминирует над pm10=20,
-    # 49/26.3*(10.0-9.1)+51 = 52.68 -> 53
+    # 49/26.3*(10.0-9.1)+51 = 52.68 -> 53. Единственное измерение — lo/hi совпадают с aqi.
     assert filled[0]["aqi"] == 53
+    assert filled[0]["aqi_lo"] == 53
+    assert filled[0]["aqi_hi"] == 53
 
 
 def test_history_averages_within_bucket(client, insert_measurement, frozen_now):
     """Несколько измерений в одной корзине усредняются, n — их количество."""
-    start = main.period_start(frozen_now, "day", 0)
-    base = start + 7200  # 02:00
+    start, _ = main.period_window(frozen_now, "24h", 0, None)
+    base = start + 2 * 3600
     insert_measurement(ts=base + 10, pm25=10.0, pm10=20.0)
     insert_measurement(ts=base + 200, pm25=30.0, pm10=41.0)
 
-    d = client.get("/api/v1/history", params={"period": "day", "tz_offset": 0}).json()
+    d = client.get("/api/v1/history", params={"period": "24h", "tz_offset": 0}).json()
     point = next(p for p in d["points"] if p["t"] == base)
     assert point["n"] == 2
     assert point["pm25"] == 20.0
     assert point["pm10"] == 30.5
 
 
-def test_history_ignores_measurements_before_period_start(client, insert_measurement,
-                                                          frozen_now):
-    """Точка вчерашним днём не попадает в суточную историю."""
-    start = main.period_start(frozen_now, "day", 0)
+def test_history_aqi_lo_hi_bracket_the_bucket_average(client, insert_measurement,
+                                                       frozen_now):
+    """aqi_lo/aqi_hi — по минимуму/максимуму PM в корзине, а не по среднему:
+    lo <= aqi <= hi, и hi считается по худшему (максимальному) измерению."""
+    start, _ = main.period_window(frozen_now, "24h", 0, None)
+    base = start + 2 * 3600
+    insert_measurement(ts=base + 10, pm25=5.0, pm10=10.0)
+    insert_measurement(ts=base + 200, pm25=30.0, pm10=60.0)
+
+    d = client.get("/api/v1/history", params={"period": "24h", "tz_offset": 0}).json()
+    point = next(p for p in d["points"] if p["t"] == base)
+    assert point["aqi_lo"] <= point["aqi"] <= point["aqi_hi"]
+    assert point["aqi_lo"] < point["aqi_hi"]
+    # lo = compute(min_pm25=5.0, min_pm10=10.0) = 28, hi = compute(max_pm25=30.0, max_pm10=60.0) = 90,
+    # avg-корзина compute(17.5, 35.0) = 67 — строго между ними.
+    assert point["aqi_lo"] == 28
+    assert point["aqi_hi"] == 90
+    assert point["aqi"] == 67
+
+
+def test_history_ignores_measurements_before_window_start(client, insert_measurement,
+                                                           frozen_now):
+    """Точка перед началом окна не попадает в выдачу."""
+    start, _ = main.period_window(frozen_now, "24h", 0, None)
     insert_measurement(ts=start - 60, pm25=99.0, pm10=99.0)
 
-    d = client.get("/api/v1/history", params={"period": "day", "tz_offset": 0}).json()
+    d = client.get("/api/v1/history", params={"period": "24h", "tz_offset": 0}).json()
     assert all(p["n"] == 0 for p in d["points"])
 
 
-def test_history_includes_measurement_exactly_at_period_start(
+def test_history_includes_measurement_exactly_at_window_start(
         client, insert_measurement, frozen_now):
     """Граница включающая: WHERE ts >= start, а не ts > start.
 
-    Точка ровно в момент period_start обязана попасть в нулевую корзину —
-    иначе первое измерение суток теряется каждый раз, когда датчик успел
-    отправиться ровно в полночь.
+    Точка ровно в момент start обязана попасть в нулевую корзину — иначе
+    самое старое измерение окна теряется, если оно пришло ровно на границе.
     """
-    start = main.period_start(frozen_now, "day", 0)
+    start, _ = main.period_window(frozen_now, "24h", 0, None)
     insert_measurement(ts=start, pm25=10.0, pm10=20.0)
 
-    d = client.get("/api/v1/history", params={"period": "day", "tz_offset": 0}).json()
+    d = client.get("/api/v1/history", params={"period": "24h", "tz_offset": 0}).json()
     assert d["points"][0]["t"] == start
     assert d["points"][0]["n"] == 1
     assert d["points"][0]["pm25"] == 10.0
 
 
-def test_history_week_covers_previous_days(client, insert_measurement, frozen_now):
-    """Недельный период начинается с понедельника и включает прошедшие сутки."""
-    week_start = main.period_start(frozen_now, "week", 0)
-    assert week_start == _ts(2026, 3, 9)
-    insert_measurement(ts=week_start + 1800, pm25=12.0, pm10=15.0)
+def test_history_7d_window_covers_full_seven_days(client, insert_measurement, frozen_now):
+    """Недельное окно — последние 7×24 часа от now, а не с понедельника."""
+    start, end = main.period_window(frozen_now, "7d", 0, None)
+    assert end - start == 7 * 86400
+    insert_measurement(ts=start + 1800, pm25=12.0, pm10=15.0)
 
-    d = client.get("/api/v1/history", params={"period": "week", "tz_offset": 0}).json()
-    assert d["start"] == week_start
-    point = next(p for p in d["points"] if p["t"] == week_start + 1800)
+    d = client.get("/api/v1/history", params={"period": "7d", "tz_offset": 0}).json()
+    assert d["start"] == start
+    point = next(p for p in d["points"] if p["t"] == start)
     assert point["n"] == 1
     assert point["pm25"] == 12.0
+
+
+def test_history_all_starts_at_first_measurement(client, insert_measurement, frozen_now):
+    """period=all — окно от корзины первого измерения, а не от эпохи."""
+    first_ts = frozen_now - 200 * 86400
+    insert_measurement(ts=first_ts, pm25=8.0, pm10=16.0)
+
+    d = client.get("/api/v1/history", params={"period": "all", "tz_offset": 0}).json()
+    start, _ = main.period_window(frozen_now, "all", 0, first_ts)
+    assert d["start"] == start
+    assert d["points"][0]["t"] == start
+    assert d["points"][0]["n"] == 1
 
 
 def test_history_counts_rows_not_values(client, insert_measurement, frozen_now):
     """n — число строк в корзине, а не число непустых значений метрики:
     корзина с одной лишь температурой всё равно приходит с n=1 и pm25=None.
     Поведение as-is, см. отчёт."""
-    start = main.period_start(frozen_now, "day", 0)
+    start, _ = main.period_window(frozen_now, "24h", 0, None)
     insert_measurement(ts=start + 600, temperature=7.0)
 
-    d = client.get("/api/v1/history", params={"period": "day", "tz_offset": 0}).json()
-    point = next(p for p in d["points"] if p["t"] == start + 600)
+    d = client.get("/api/v1/history", params={"period": "24h", "tz_offset": 0}).json()
+    point = next(p for p in d["points"] if p["t"] == start)
     assert point["n"] == 1
     assert point["temperature"] == 7.0
     assert point["pm25"] is None
     assert point["aqi"] is None
+    assert point["aqi_lo"] is None and point["aqi_hi"] is None
 
 
-def test_history_drops_measurements_newer_than_now(client, insert_measurement,
+def test_history_drops_measurements_newer_than_end(client, insert_measurement,
                                                    frozen_now):
     """Измерение с ts из будущего в выдачу не попадает: сетка обрывается на
-    now, а SQL-корзина уезжает за неё. Поведение as-is, см. отчёт."""
+    текущей корзине, а SQL-корзина уезжает за неё. Поведение as-is, см. отчёт."""
     insert_measurement(ts=frozen_now + 3600, pm25=50.0, pm10=60.0)
 
-    d = client.get("/api/v1/history", params={"period": "day", "tz_offset": 0}).json()
+    d = client.get("/api/v1/history", params={"period": "24h", "tz_offset": 0}).json()
     assert d["points"][-1]["t"] <= d["end"]
     assert all(p["n"] == 0 for p in d["points"])
     # строка при этом в БД есть — потерялась именно выдача
