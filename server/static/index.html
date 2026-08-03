@@ -192,7 +192,7 @@ button, input { font-family: inherit; }
 .badge { display: inline-block; margin-top: 14px; font-size: 12.5px; font-weight: 600; padding: 5px 11px; border-radius: 6px; }
 .badge[hidden] { display: none; }
 .scale { position: relative; height: 5px; border-radius: 3px; margin-top: 18px;
-  background: linear-gradient(90deg, #6fce4e 0 10%, #efd23c 10% 20%, #f0993d 20% 30%, #e05252 30% 40%, #96609c 40% 60%, #8a3550 60% 100%); }
+  background: linear-gradient(90deg, #6fce4e 0 16.667%, #efd23c 16.667% 33.333%, #f0993d 33.333% 50%, #e05252 50% 66.667%, #96609c 66.667% 83.333%, #8a3550 83.333% 100%); }
 .scale-marker { position: absolute; top: -5px; width: 2px; height: 15px; border-radius: 1px; background: var(--ink); box-shadow: 0 0 0 3px var(--card); transform: translateX(-50%); }
 .verdict-title { font-size: 22px; line-height: 1.18; font-weight: 700; letter-spacing: -0.02em; margin: 24px 0 0; }
 .verdict-body { font-size: 14px; line-height: 1.5; color: var(--ink-2); margin: 10px 0 0; }
@@ -592,6 +592,7 @@ function renderHero() {
   const cat = info && info.category && CATS[info.category];
   if (!info || info.aqi == null || !cat) {
     numEl.textContent = "—";
+    numEl.style.color = "";
     badge.hidden = true;
     marker.hidden = true;
     titleEl.textContent = "Пока нет данных";
@@ -602,6 +603,7 @@ function renderHero() {
   }
   const v = VERDICT[info.category];
   numEl.textContent = info.aqi;
+  numEl.style.color = cat.line;
   badge.hidden = false;
   badge.textContent = cat.label;
   badge.style.background = cat.color;
