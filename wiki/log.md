@@ -211,3 +211,20 @@ temp, сид-скрипт) проверен вживую перед тем, ка
 [deploy-cicd](pages/deploy-cicd.md), [history-buckets](pages/history-buckets.md),
 [protocol-airrohr-push](pages/protocol-airrohr-push.md),
 [requirements](pages/requirements.md) — O1, [roadmap](pages/roadmap.md).
+
+## [2026-08-03] ingest | CI гоняет тесты и на dev, без деплоя
+
+Работа по мульти-тучковой версии идёт в ветке `dev`, а триггер workflow стоял
+только на `main` — коммиты в `dev` не проверялись вообще. Добавлен `dev` в
+`on.push.branches`; джоб `deploy` уже был отсечён гейтом
+`if: github.ref == 'refs/heads/main'`, так что деплоя с `dev` не будет.
+
+Побочный эффект, который пришлось убрать: concurrency-группа была одна на всё
+(`deploy-production`), и прогоны с `dev` вставали бы в очередь за прод-деплоем.
+Группа стала `ci-${{ github.ref }}` — по ветке. Это безопасно ровно потому, что
+деплоит только `main`: разные ветки больше не пересекаются, но два деплоя на
+один сервер по-прежнему невозможны. `cancel-in-progress` включён везде, кроме
+`main` — устаревший прогон тестов отменять правильно, идущий деплой рвать нельзя.
+
+Затронуто: [deploy-cicd](pages/deploy-cicd.md),
+[requirements](pages/requirements.md) — O1.

@@ -117,12 +117,13 @@ PM2.5 и PM10; в ответе указывается «определяющий
 
 ## Деплой и эксплуатация
 
+- CI гоняет тесты на push в `main` и в `dev`; деплой — только с `main`.
 - Деплой автоматический: push в `main` → CI (`compileall` + pytest) → тот же
   `deploy/deploy.sh`. Красные тесты деплой не пускают.
 - Ручной/аварийный прогон: `./deploy/deploy.sh`
 - Доступ: ssh-алиас `tu4ka` (root@178.160.230.131, ключ `~/.ssh/tu4ka`)
 - Логи: `ssh tu4ka journalctl -u tu4ka -f`
-- Код на сервере: `/opt/tu4ka/app`
+- Код на сервере: `/opt/tu4ka/app/server/` (в `app/` больше ничего нет)
 - Виртуальное окружение: `/opt/tu4ka/venv`
 - База: `/var/lib/tu4ka/tu4ka.db` — вне `/opt/tu4ka`, деплой её не трогает
 - Креды push: `/etc/tu4ka/env`

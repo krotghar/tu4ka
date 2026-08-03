@@ -37,10 +37,12 @@ curl http://178.160.230.131/healthz     # быстрая проверка жив
 gh run list --limit 5                   # прогоны CI
 ```
 
-**Деплой автоматический**: push в `main` запускает `.github/workflows/ci.yml` —
-джоб `test` (compileall + pytest), затем `deploy`, который зовёт тот же
-`deploy/deploy.sh` с `TU4KA_HOST=root@178.160.230.131`. Красные тесты деплой не
-пускают. `deploy.sh` остаётся для ручного/аварийного прогона.
+**CI**: `.github/workflows/ci.yml` гоняется на push в `main` и в `dev`. Джоб
+`test` (compileall + pytest) — на обеих ветках; джоб `deploy` гейтится
+`if: github.ref == 'refs/heads/main'`, так что **с `dev` деплоя не будет**.
+На `main` деплой зовёт тот же `deploy/deploy.sh` с
+`TU4KA_HOST=root@178.160.230.131`; красные тесты деплой не пускают.
+`deploy.sh` остаётся для ручного/аварийного прогона.
 
 Линтера нет. Тесты — pytest, лежат в `tests/`, 238 штук.
 
