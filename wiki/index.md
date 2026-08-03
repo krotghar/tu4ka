@@ -5,6 +5,10 @@
 тривиально из чтения `server/main.py`. Схема (правила ingest/query/lint) — в
 разделе «Wiki» [../CLAUDE.md](../CLAUDE.md).
 
+## Требования и приёмка
+
+- [requirements](pages/requirements.md) — свод действующих требований со стабильными ID (P/C/H/Z/D/A/U/O), чек-лист ручной приёмки для субагента `tester`
+
 ## Матчасть
 
 - [protocol-airrohr-push](pages/protocol-airrohr-push.md) — формат `POST /api/v1/push`, маппинг полей, авторизация датчика
