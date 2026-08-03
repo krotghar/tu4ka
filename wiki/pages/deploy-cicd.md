@@ -4,10 +4,13 @@
 
 - Сервер: VPS `178.160.230.131`, Ubuntu 24.04, 2 ГБ RAM. ssh-алиас `tu4ka`
   (root, ключ `~/.ssh/tu4ka`).
-- FastAPI + uvicorn на порту 80, systemd-юнит `tu4ka`.
+- FastAPI + uvicorn на порту 80, systemd-юнит `tu4ka`;
+  `ExecStart=… uvicorn server.main:app --app-dir /opt/tu4ka/app`.
 - SQLite `/var/lib/tu4ka/tu4ka.db` (WAL) — **вне** `/opt/tu4ka`, так что деплой
   с `--delete` её не задевает.
-- Код на сервере: `/opt/tu4ka/app`, venv `/opt/tu4ka/venv`.
+- Код на сервере: `/opt/tu4ka/app/server/`, venv `/opt/tu4ka/venv`. Инвариант
+  «`app/` содержит ровно `server/`» держит rsync-фильтр в `deploy.sh` —
+  см. [server-package-layout](server-package-layout.md).
 - Креды push (`TU4KA_PUSH_USER`/`TU4KA_PUSH_PASS`) генерируются один раз в
   `/etc/tu4ka/env` — идемпотентно, `deploy/remote_setup.sh` их не перегенерит
   при повторных запусках.
@@ -15,7 +18,7 @@
 ## Автодеплой
 
 Push в `main` → `.github/workflows/ci.yml`:
-1. джоб `test` — `py_compile` + pytest;
+1. джоб `test` — `compileall` + pytest;
 2. джоб `deploy` — тот же `deploy/deploy.sh`, но с `TU4KA_HOST=root@178.160.230.131`.
 
 Красные тесты **блокируют** деплой. `deploy/deploy.sh` остаётся и для ручного/

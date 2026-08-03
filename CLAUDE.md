@@ -38,7 +38,7 @@ gh run list --limit 5                   # прогоны CI
 ```
 
 **Деплой автоматический**: push в `main` запускает `.github/workflows/ci.yml` —
-джоб `test` (py_compile + pytest), затем `deploy`, который зовёт тот же
+джоб `test` (compileall + pytest), затем `deploy`, который зовёт тот же
 `deploy/deploy.sh` с `TU4KA_HOST=root@178.160.230.131`. Красные тесты деплой не
 пускают. `deploy.sh` остаётся для ручного/аварийного прогона.
 
@@ -58,18 +58,29 @@ API, смотрит дашборд в браузере, сверяет с чек
 
 ## Архитектура
 
-- `server/main.py` — всё приложение FastAPI: приём push (`POST /api/v1/push`),
-  маппинг `sensordatavalues` (SDS_P1→pm10, SDS_P2→pm25, BME280_*/BMP280_*;
-  давление приходит в Па, храним в гПа), SQLite-схема, history-агрегация.
-  Окна `/history` скользящие: `period_window()` считает `(start, end)` от
-  сетки корзин, сдвинутой на `tz_offset` (`end` — начало корзины, в которую
-  попадает `now`; для `all` начало окна — корзина первого измерения). Корзины
-  без измерений отдаются с null и `n=0` — плотная сетка, ось времени клиента.
-  Каждая точка несёт `aqi_lo`/`aqi_hi` (AQI по минимуму/максимуму PM в корзине,
-  `aqi_hi` точен, `aqi_lo` — нижняя оценка) и `<метрика>_lo`/`_hi` для всех
-  пяти метрик (pm25, pm10, temperature, humidity, pressure — просто min/max
-  внутри корзины) — фронт рисует по ним ленту разброса вокруг линии AQI или
-  выбранной метрики.
+`server/` — python-пакет; запуск `uvicorn server.main:app`. Раскладка модулей
+и правила владения — [server-package-layout](wiki/pages/server-package-layout.md).
+
+- `server/main.py` — только сборка приложения: `FastAPI()`, `lifespan`, CORS,
+  `mount("/static")`, `include_router()`, `GET /`. Логики здесь нет.
+- `server/db.py` — SQLite: `DB_PATH`, `SCHEMA`, `connect()`, `init_schema()`.
+- `server/auth.py` — креды push (`PUSH_USER`/`PUSH_PASS`, `check_push_auth()`).
+- `server/routes/push.py` — приём push (`POST /api/v1/push`), маппинг
+  `sensordatavalues` (SDS_P1→pm10, SDS_P2→pm25, BME280_*/BMP280_*; давление
+  приходит в Па, храним в гПа).
+- `server/routes/api.py` — `/api/v1/current` (NowCast-AQI), `/api/v1/history`
+  (валидация параметров), `/healthz`.
+- `server/history.py` — окна и корзины `/history`, без зависимости от FastAPI.
+  Окна скользящие: `period_window()` считает `(start, end)` от сетки корзин,
+  сдвинутой на `tz_offset` (`end` — начало корзины, в которую попадает `now`;
+  для `all` начало окна — корзина первого измерения). Корзины без измерений
+  отдаются с null и `n=0` — плотная сетка, ось времени клиента. Каждая точка
+  несёт `aqi_lo`/`aqi_hi` (AQI по минимуму/максимуму PM в корзине, `aqi_hi`
+  точен, `aqi_lo` — нижняя оценка) и `<метрика>_lo`/`_hi` для всех пяти метрик
+  (pm25, pm10, temperature, humidity, pressure — просто min/max внутри корзины)
+  — фронт рисует по ним ленту разброса вокруг линии AQI или выбранной метрики.
+- `server/quality.py`, `server/geo.py` — пока пустые каркасы под качество
+  данных и смещение публичных координат.
 - `server/aqi.py` — расчёт US EPA AQI: breakpoints PM2.5/PM10 (редакция 2024,
   источник — AirNow Technical Assistance Document, Table 6) + NowCast (12-часовое
   взвешенное среднее). Чистые функции без зависимостей; `/current` отдаёт NowCast-AQI,
@@ -87,12 +98,14 @@ API, смотрит дашборд в браузере, сверяет с чек
   `/api/v1/current` и `/api/v1/history`.
 - `deploy/remote_setup.sh` — идемпотентная настройка сервера; креды push
   генерируются один раз в `/etc/tu4ka/env` (TU4KA_PUSH_USER/TU4KA_PUSH_PASS).
-- Код на сервере: `/opt/tu4ka/app`, venv `/opt/tu4ka/venv`.
-- `tests/` — pytest. `conftest.py` подменяет `main.DB_PATH`/`PUSH_*` через
-  `setattr`, а не переменными окружения: `main.py` читает их в глобалы на импорте,
-  так что `setenv` опаздывает. `TestClient` — только как контекст-менеджер, иначе
-  не отработает `lifespan` и в БД не будет схемы. Время в тестах истории заморожено
-  фикстурой `frozen_now` — без неё они плавают у границы суток.
+- Код на сервере: `/opt/tu4ka/app/server/`, venv `/opt/tu4ka/venv`. Инвариант:
+  `app/` содержит ровно `server/` — за это отвечает rsync-фильтр в `deploy.sh`.
+- `tests/` — pytest, `pythonpath = .` (пакет импортируется как `server.*`).
+  `conftest.py` подменяет `db.DB_PATH`/`auth.PUSH_*` через `setattr`, а не
+  переменными окружения: модули читают их в глобалы на импорте, так что `setenv`
+  опаздывает. `TestClient` — только как контекст-менеджер, иначе не отработает
+  `lifespan` и в БД не будет схемы. Время в тестах истории заморожено фикстурой
+  `frozen_now` — без неё они плавают у границы суток.
 - `.github/workflows/ci.yml` — CI/CD. Ключ деплоя лежит в секрете репозитория
   `TU4KA_SSH_KEY` (отдельный ed25519, в `authorized_keys` сервера с префиксом
   `restrict`), host key сервера запиннен прямо в workflow — он публичный, и в git

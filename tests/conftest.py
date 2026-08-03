@@ -1,9 +1,9 @@
 """Общие фикстуры тестов.
 
-Главная тонкость: main.py читает TU4KA_DB / TU4KA_PUSH_USER / TU4KA_PUSH_PASS
-в глобалы на момент импорта модуля. Переопределять переменные окружения после
-импорта бесполезно — подменяем сами глобалы (db() и check_push_auth читают их
-при каждом вызове, так что monkeypatch работает).
+Главная тонкость: db.py и auth.py читают TU4KA_DB / TU4KA_PUSH_USER /
+TU4KA_PUSH_PASS в глобалы на момент импорта модуля. Переопределять переменные
+окружения после импорта бесполезно — подменяем сами глобалы (db.connect() и
+auth.check_push_auth() читают их при каждом вызове, так что monkeypatch работает).
 """
 
 import sqlite3
@@ -12,7 +12,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-import main
+from server import auth, db, main
 
 PUSH_USER = "tu4ka"
 PUSH_PASS = "test-secret"
@@ -23,14 +23,14 @@ def db_path(tmp_path, monkeypatch):
     """Уводим БД из /var/lib/tu4ka во временный каталог теста.
 
     Заодно гасим креды push: TU4KA_PUSH_USER/TU4KA_PUSH_PASS — штатные переменные
-    проекта (лежат в /etc/tu4ka/env), и если они окажутся в окружении, main.py
+    проекта (лежат в /etc/tu4ka/env), и если они окажутся в окружении, auth.py
     подхватит их на импорте и включит basic-auth. Без этого сброса на такой машине
     посыпались бы все push-тесты, работающие через фикстуру client.
     """
     path = tmp_path / "tu4ka.db"
-    monkeypatch.setattr(main, "DB_PATH", str(path))
-    monkeypatch.setattr(main, "PUSH_USER", "")
-    monkeypatch.setattr(main, "PUSH_PASS", "")
+    monkeypatch.setattr(db, "DB_PATH", str(path))
+    monkeypatch.setattr(auth, "PUSH_USER", "")
+    monkeypatch.setattr(auth, "PUSH_PASS", "")
     return path
 
 
@@ -45,8 +45,8 @@ def client(db_path):
 @pytest.fixture
 def auth_client(db_path, monkeypatch):
     """Клиент на приложении с включённой basic-авторизацией push."""
-    monkeypatch.setattr(main, "PUSH_USER", PUSH_USER)
-    monkeypatch.setattr(main, "PUSH_PASS", PUSH_PASS)
+    monkeypatch.setattr(auth, "PUSH_USER", PUSH_USER)
+    monkeypatch.setattr(auth, "PUSH_PASS", PUSH_PASS)
     with TestClient(main.app) as c:
         yield c
 

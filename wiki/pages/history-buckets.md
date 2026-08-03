@@ -10,7 +10,7 @@
 
 ## Как считаются окна
 
-`PERIODS` (`server/main.py`) — период → `(длина скользящего окна в секундах
+`PERIODS` (`server/history.py`) — период → `(длина скользящего окна в секундах
 или None для "all", шаг корзины в секундах)`:
 
 | period | окно            | корзина |
@@ -80,5 +80,6 @@ UTC** — иначе тест перестанет защищать инвари
 ## Источники
 
 - Матчасть и формулировка инварианта: [CLAUDE.md](../../CLAUDE.md).
-- Реализация: [server/main.py](../../server/main.py) — `PERIODS`, `period_window()`, `history()`.
+- Реализация: [server/history.py](../../server/history.py) — `PERIODS`, `period_window()`,
+  `build_history()`; обработчик и валидация параметров — [server/routes/api.py](../../server/routes/api.py).
 - Коммит редизайна: `fe61145` — «Redesign the dashboard and switch history to sliding windows».

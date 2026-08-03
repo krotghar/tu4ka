@@ -42,4 +42,5 @@ Basic auth: user `tu4ka`, пароль — `TU4KA_PUSH_PASS` из `/etc/tu4ka/en
 ## Источники
 
 - Матчасть из [CLAUDE.md](../../CLAUDE.md) и [README.md](../../README.md) проекта.
-- Реализация: [server/main.py](../../server/main.py).
+- Реализация: [server/routes/push.py](../../server/routes/push.py); проверка кредов —
+  [server/auth.py](../../server/auth.py).

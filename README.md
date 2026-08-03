@@ -88,7 +88,13 @@ PM2.5 и PM10; в ответе указывается «определяющий
 
 ## Структура репозитория
 
-- `server/main.py` — приложение FastAPI
+- `server/` — python-пакет приложения (`uvicorn server.main:app`):
+  - `main.py` — сборка приложения FastAPI
+  - `db.py` — SQLite: подключение, прагмы, схема
+  - `auth.py` — учётные данные push
+  - `history.py` — скользящие окна и корзины `/history`
+  - `routes/push.py`, `routes/api.py` — эндпоинты
+  - `quality.py`, `geo.py` — каркасы под качество данных и координаты
 - `server/aqi.py` — расчёт US EPA AQI (breakpoints 2024 + NowCast), чистые функции
 - `server/static/index.html` — веб-морда одной страницей: свой SVG для графиков,
   без сборки и внешних зависимостей
@@ -111,7 +117,7 @@ PM2.5 и PM10; в ответе указывается «определяющий
 
 ## Деплой и эксплуатация
 
-- Деплой автоматический: push в `main` → CI (`py_compile` + pytest) → тот же
+- Деплой автоматический: push в `main` → CI (`compileall` + pytest) → тот же
   `deploy/deploy.sh`. Красные тесты деплой не пускают.
 - Ручной/аварийный прогон: `./deploy/deploy.sh`
 - Доступ: ssh-алиас `tu4ka` (root@178.160.230.131, ключ `~/.ssh/tu4ka`)

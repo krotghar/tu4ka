@@ -1,4 +1,4 @@
-"""Тесты HTTP-слоя server/main.py через fastapi.testclient.TestClient.
+"""Тесты HTTP-слоя приложения через fastapi.testclient.TestClient.
 
 Фикстуры (client, auth_client, db_path, insert_measurement) и константы
 PUSH_USER/PUSH_PASS живут в tests/conftest.py — здесь только тесты.
@@ -8,12 +8,14 @@ PUSH_USER/PUSH_PASS живут в tests/conftest.py — здесь только 
 """
 
 import base64
+import time
 from datetime import datetime, timezone
 
 import pytest
 
-import main
 from conftest import PUSH_PASS, PUSH_USER
+from server import auth, history
+from server.routes import push as push_routes
 
 # Опорный момент: среда 2026-03-11 15:20:00 UTC. Среда — чтобы «неделя с
 # понедельника» отличалась и от начала суток, и от начала месяца.
@@ -27,8 +29,8 @@ def _ts(year, month, day, hour=0, minute=0):
 
 @pytest.fixture
 def frozen_now(monkeypatch):
-    """Замораживает time.time(), который main зовёт в push/current/history."""
-    monkeypatch.setattr(main.time, "time", lambda: float(NOW))
+    """Замораживает time.time(), который роуты зовут в push/current/history."""
+    monkeypatch.setattr(time, "time", lambda: float(NOW))
     return NOW
 
 
@@ -49,14 +51,14 @@ def _push_body(**values):
 def test_period_window_end_is_floor_of_now_to_bucket():
     """end — начало корзины, в которую попадает now (обычно ещё не полной),
     а не now дословно. 24h: bucket=1ч, 15:20 -> корзина с 15:00."""
-    start, end = main.period_window(NOW, "24h", 0, None)
+    start, end = history.period_window(NOW, "24h", 0, None)
     assert end == _ts(2026, 3, 11, 15, 0)
     assert start == end - 24 * 3600
 
 
 def test_period_window_span_is_end_minus_span():
     """Для окна фиксированной длины start = end - span, счёт не от эпохи."""
-    start, end = main.period_window(NOW, "7d", 0, None)
+    start, end = history.period_window(NOW, "7d", 0, None)
     assert end == _ts(2026, 3, 11, 15, 0)
     assert start == end - 7 * 86400
 
@@ -65,8 +67,8 @@ def test_period_window_offset_shifts_hourly_grid():
     """tz_offset двигает сетку и для часовых корзин, не только суточных:
     +90 и -90 мин одинаково уводят границу с :00 на :30 (симметрично
     относительно 15:20, поэтому оба смещения дают один и тот же результат)."""
-    start_pos, end_pos = main.period_window(NOW, "24h", 90, None)
-    start_neg, end_neg = main.period_window(NOW, "24h", -90, None)
+    start_pos, end_pos = history.period_window(NOW, "24h", 90, None)
+    start_neg, end_neg = history.period_window(NOW, "24h", -90, None)
     assert end_pos == end_neg == _ts(2026, 3, 11, 14, 30)
     assert start_pos == end_pos - 24 * 3600
 
@@ -79,7 +81,7 @@ def test_period_window_offset_shifts_hourly_grid():
 def test_period_window_offset_shifts_daily_grid(tz_offset, expected_start, expected_end):
     """30d: bucket суточный, tz_offset ставит сетку на местную полночь,
     а не на полночь UTC."""
-    start, end = main.period_window(NOW, "30d", tz_offset, None)
+    start, end = history.period_window(NOW, "30d", tz_offset, None)
     assert start == _ts(*expected_start)
     assert end == _ts(*expected_end)
 
@@ -87,23 +89,23 @@ def test_period_window_offset_shifts_daily_grid(tz_offset, expected_start, expec
 def test_period_window_all_starts_at_first_measurement_bucket():
     """all: начало — корзина, в которую попадает первое измерение, а не эпоха."""
     first_ts = _ts(2025, 6, 15, 10, 0)
-    start, end = main.period_window(NOW, "all", 0, first_ts)
-    bucket = main.PERIODS["all"][1]
+    start, end = history.period_window(NOW, "all", 0, first_ts)
+    bucket = history.PERIODS["all"][1]
     assert start <= first_ts < start + bucket
     assert start % bucket == 0
 
 
 def test_period_window_all_with_no_data_start_equals_end():
     """all и БД пуста (first_ts=None) — окно вырождается в одну точку."""
-    start, end = main.period_window(NOW, "all", 0, None)
+    start, end = history.period_window(NOW, "all", 0, None)
     assert start == end
 
 
-@pytest.mark.parametrize("period", sorted(main.PERIODS))
+@pytest.mark.parametrize("period", sorted(history.PERIODS))
 @pytest.mark.parametrize("tz_offset", [-840, -300, 0, 180, 840])
 def test_period_window_never_in_future(period, tz_offset):
     """Конец окна не может оказаться позже текущего момента, начало — не позже конца."""
-    start, end = main.period_window(NOW, period, tz_offset, None)
+    start, end = history.period_window(NOW, period, tz_offset, None)
     assert end <= NOW
     assert start <= end
 
@@ -263,7 +265,7 @@ def test_push_rejects_wrong_sensordatavalues(client, payload):
 
 def test_push_body_too_large(client):
     """Тело больше MAX_PUSH_BODY отбивается на лету, до разбора JSON."""
-    r = client.post("/api/v1/push", content=b"x" * (main.MAX_PUSH_BODY + 1))
+    r = client.post("/api/v1/push", content=b"x" * (push_routes.MAX_PUSH_BODY + 1))
     assert r.status_code == 413
     assert client.get("/healthz").json()["rows"] == 0
 
@@ -271,7 +273,7 @@ def test_push_body_too_large(client):
 def test_push_body_at_limit_is_parsed(client):
     """Ровно MAX_PUSH_BODY байт — не «too large»: до разбора доходит, падает
     уже на JSON (нужен именно 400, а не 413)."""
-    r = client.post("/api/v1/push", content=b"x" * main.MAX_PUSH_BODY)
+    r = client.post("/api/v1/push", content=b"x" * push_routes.MAX_PUSH_BODY)
     assert r.status_code == 400
 
 
@@ -319,7 +321,7 @@ def _basic(user, password):
     "Basic !!!not-base64!!!",         # не декодируется (binascii.Error)
     "Basic " + base64.b64encode(b"no-colon-here").decode(),  # нет разделителя
     "Bearer token",                   # не та схема
-    # Схема с маленькой буквы: креды верные, но main.py проверяет
+    # Схема с маленькой буквы: креды верные, но auth.py проверяет
     # header.startswith("Basic ") — регистр важен, ждём 401.
     _basic(PUSH_USER, PUSH_PASS).replace("Basic ", "basic ", 1),
     "",                               # пустой заголовок
@@ -343,7 +345,7 @@ def test_push_non_ascii_credentials_is_401(auth_client):
 def test_push_without_password_configured_needs_no_auth(client):
     """Документированное поведение: пустой TU4KA_PUSH_PASS отключает проверку
     (в лог при старте пишется предупреждение). Фикстура client как раз такая."""
-    assert main.PUSH_PASS == ""
+    assert auth.PUSH_PASS == ""
     r = client.post("/api/v1/push", json=_push_body(SDS_P2="7.1"))
     assert r.status_code == 200, r.text
 
@@ -489,7 +491,7 @@ def test_history_start_follows_tz_offset(client, frozen_now, tz_offset,
     30d выбран специально: у него суточная корзина, поэтому сдвиг пояса
     сразу виден на start/end (в отличие от 24h/7d, где сетка часовая и
     смещение на целое число часов её не меняет). Ожидания — литералы, а не
-    вызов main.period_window: иначе тест повторил бы реализацию и не заметил,
+    вызов history.period_window: иначе тест повторил бы реализацию и не заметил,
     если бы history перестала передавать пояс дальше.
     """
     d = client.get("/api/v1/history",
@@ -508,7 +510,7 @@ def test_history_buckets_are_anchored_to_tz_shifted_grid_not_epoch(
     которого нет в сетке range(start, end+1, bucket), и молча пропало бы
     из выдачи.
     """
-    start, end = main.period_window(frozen_now, "30d", 330, None)
+    start, end = history.period_window(frozen_now, "30d", 330, None)
     assert start == _ts(2026, 2, 8, 18, 30)
     assert start % 86400 != 0, "кейс бесполезен: сетки совпали, расхождение не поймать"
 
@@ -528,7 +530,7 @@ def test_history_grid_is_dense_and_starts_at_window_start(client, frozen_now):
     приходят с n=0, null-метриками и null aqi/aqi_lo/aqi_hi."""
     d = client.get("/api/v1/history", params={"period": "24h", "tz_offset": 0}).json()
 
-    start, end = main.period_window(frozen_now, "24h", 0, None)
+    start, end = history.period_window(frozen_now, "24h", 0, None)
     assert d["start"] == start == _ts(2026, 3, 10, 15, 0)
     assert d["end"] == frozen_now
 
@@ -550,7 +552,7 @@ def test_history_metric_lo_hi_bracket_the_bucket_average(client, insert_measurem
                                                           frozen_now):
     """<metric>_lo/_hi — минимум/максимум самой метрики внутри корзины
     (лента разброса на графике при выборе метрики), не только у PM/AQI."""
-    start, _ = main.period_window(frozen_now, "24h", 0, None)
+    start, _ = history.period_window(frozen_now, "24h", 0, None)
     base = start + 2 * 3600
     insert_measurement(ts=base + 10, temperature=5.0, humidity=40.0, pressure=1000.0)
     insert_measurement(ts=base + 200, temperature=9.0, humidity=60.0, pressure=1004.0)
@@ -565,7 +567,7 @@ def test_history_metric_lo_hi_bracket_the_bucket_average(client, insert_measurem
 
 
 def test_history_measurement_lands_in_its_bucket(client, insert_measurement, frozen_now):
-    start, _ = main.period_window(frozen_now, "24h", 0, None)
+    start, _ = history.period_window(frozen_now, "24h", 0, None)
     ts = start + 3600 + 100  # середина второй корзины (часовой)
     insert_measurement(ts=ts, pm25=10.0, pm10=20.0, temperature=5.5)
 
@@ -588,7 +590,7 @@ def test_history_measurement_lands_in_its_bucket(client, insert_measurement, fro
 
 def test_history_averages_within_bucket(client, insert_measurement, frozen_now):
     """Несколько измерений в одной корзине усредняются, n — их количество."""
-    start, _ = main.period_window(frozen_now, "24h", 0, None)
+    start, _ = history.period_window(frozen_now, "24h", 0, None)
     base = start + 2 * 3600
     insert_measurement(ts=base + 10, pm25=10.0, pm10=20.0)
     insert_measurement(ts=base + 200, pm25=30.0, pm10=41.0)
@@ -604,7 +606,7 @@ def test_history_aqi_lo_hi_bracket_the_bucket_average(client, insert_measurement
                                                        frozen_now):
     """aqi_lo/aqi_hi — по минимуму/максимуму PM в корзине, а не по среднему:
     lo <= aqi <= hi, и hi считается по худшему (максимальному) измерению."""
-    start, _ = main.period_window(frozen_now, "24h", 0, None)
+    start, _ = history.period_window(frozen_now, "24h", 0, None)
     base = start + 2 * 3600
     insert_measurement(ts=base + 10, pm25=5.0, pm10=10.0)
     insert_measurement(ts=base + 200, pm25=30.0, pm10=60.0)
@@ -623,7 +625,7 @@ def test_history_aqi_lo_hi_bracket_the_bucket_average(client, insert_measurement
 def test_history_ignores_measurements_before_window_start(client, insert_measurement,
                                                            frozen_now):
     """Точка перед началом окна не попадает в выдачу."""
-    start, _ = main.period_window(frozen_now, "24h", 0, None)
+    start, _ = history.period_window(frozen_now, "24h", 0, None)
     insert_measurement(ts=start - 60, pm25=99.0, pm10=99.0)
 
     d = client.get("/api/v1/history", params={"period": "24h", "tz_offset": 0}).json()
@@ -637,7 +639,7 @@ def test_history_includes_measurement_exactly_at_window_start(
     Точка ровно в момент start обязана попасть в нулевую корзину — иначе
     самое старое измерение окна теряется, если оно пришло ровно на границе.
     """
-    start, _ = main.period_window(frozen_now, "24h", 0, None)
+    start, _ = history.period_window(frozen_now, "24h", 0, None)
     insert_measurement(ts=start, pm25=10.0, pm10=20.0)
 
     d = client.get("/api/v1/history", params={"period": "24h", "tz_offset": 0}).json()
@@ -648,7 +650,7 @@ def test_history_includes_measurement_exactly_at_window_start(
 
 def test_history_7d_window_covers_full_seven_days(client, insert_measurement, frozen_now):
     """Недельное окно — последние 7×24 часа от now, а не с понедельника."""
-    start, end = main.period_window(frozen_now, "7d", 0, None)
+    start, end = history.period_window(frozen_now, "7d", 0, None)
     assert end - start == 7 * 86400
     insert_measurement(ts=start + 1800, pm25=12.0, pm10=15.0)
 
@@ -665,7 +667,7 @@ def test_history_all_starts_at_first_measurement(client, insert_measurement, fro
     insert_measurement(ts=first_ts, pm25=8.0, pm10=16.0)
 
     d = client.get("/api/v1/history", params={"period": "all", "tz_offset": 0}).json()
-    start, _ = main.period_window(frozen_now, "all", 0, first_ts)
+    start, _ = history.period_window(frozen_now, "all", 0, first_ts)
     assert d["start"] == start
     assert d["points"][0]["t"] == start
     assert d["points"][0]["n"] == 1
@@ -675,7 +677,7 @@ def test_history_counts_rows_not_values(client, insert_measurement, frozen_now):
     """n — число строк в корзине, а не число непустых значений метрики:
     корзина с одной лишь температурой всё равно приходит с n=1 и pm25=None.
     Поведение as-is, см. отчёт."""
-    start, _ = main.period_window(frozen_now, "24h", 0, None)
+    start, _ = history.period_window(frozen_now, "24h", 0, None)
     insert_measurement(ts=start + 600, temperature=7.0)
 
     d = client.get("/api/v1/history", params={"period": "24h", "tz_offset": 0}).json()

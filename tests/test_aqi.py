@@ -17,7 +17,7 @@ import math
 
 import pytest
 
-import aqi
+from server import aqi
 
 
 # --------------------------------------------------------------------------

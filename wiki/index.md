@@ -2,7 +2,7 @@
 
 Живая вики проекта по паттерну [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f):
 не пересказ кода, а накопленное знание о системе — то, что не выводится
-тривиально из чтения `server/main.py`. Схема (правила ingest/query/lint) — в
+тривиально из чтения исходников. Схема (правила ingest/query/lint) — в
 разделе «Wiki» [../CLAUDE.md](../CLAUDE.md).
 
 ## Требования и приёмка
@@ -11,6 +11,7 @@
 
 ## Матчасть
 
+- [server-package-layout](pages/server-package-layout.md) — раскладка пакета `server/`: кто каким модулем владеет, почему обращаться к глобалам через модуль, ловушка `rsync --delete` при деплое
 - [protocol-airrohr-push](pages/protocol-airrohr-push.md) — формат `POST /api/v1/push`, маппинг полей, авторизация датчика
 - [aqi-nowcast](pages/aqi-nowcast.md) — breakpoints EPA AQI, NowCast vs мгновенный AQI (+ lo/hi разброс), открытый TODO по источнику
 - [history-buckets](pages/history-buckets.md) — скользящие окна `/history`, почему корзины привязаны к tz-сдвинутой сетке, а не к эпохе; `aqi_lo`/`_hi` и `<метрика>_lo`/`_hi` для ленты разброса

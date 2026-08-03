@@ -26,8 +26,10 @@ tools: Read, Grep, Glob, Bash, mcp__Claude_Browser__preview_start, mcp__Claude_B
 
 `git status`, `git diff --stat` и `git diff` (относительно базы задачи или HEAD —
 смотри, что передано в задании). По диффу выбери требования, которые изменения
-могли задеть: правки `server/main.py` → блоки P/C/H/Z, `server/aqi.py` → A,
-`server/static/index.html` → U, `deploy/` и `.github/` → O.
+могли задеть: правки `server/routes/push.py` → блок P, `server/routes/api.py` и
+`server/history.py` → C/H/Z, `server/aqi.py` → A, `server/static/index.html` → U,
+`deploy/` и `.github/` → O. Правки `server/main.py`, `server/db.py`,
+`server/auth.py` задевают всё сразу.
 
 Проверяй **выбранные требования + смоук-набор** (C1, H1, H5, D1, U3, U6, U9,
 U11): даже мелкая правка фронта умеет сломать переключение метрик.
@@ -52,12 +54,11 @@ U11): даже мелкая правка фронта умеет сломать 
 ```bash
 D=${TMPDIR:-/tmp}/tu4ka-check && rm -rf $D && mkdir -p $D
 TU4KA_DB=$D/tu4ka.db .venv/bin/python - <<'PY'
-import math, os, random, sqlite3, sys, time
-sys.path.insert(0, "server")
-import main
-os.makedirs(os.path.dirname(main.DB_PATH), exist_ok=True)
-conn = sqlite3.connect(main.DB_PATH)
-conn.executescript(main.SCHEMA)
+import math, os, random, sqlite3, time
+from server import db
+os.makedirs(os.path.dirname(db.DB_PATH), exist_ok=True)
+conn = sqlite3.connect(db.DB_PATH)
+conn.executescript(db.SCHEMA)
 random.seed(7)
 now = int(time.time())
 ts_list = [now - ago * 3600 for ago in range(400 * 24, 24, -1)]      # 400 дней по часу
@@ -77,7 +78,7 @@ with conn:
 print("seeded", conn.execute("select count(*) from measurements").fetchone()[0])
 PY
 
-TU4KA_DB=$D/tu4ka.db .venv/bin/python -m uvicorn main:app --app-dir server --port 8765 > $D/uvicorn.log 2>&1 &
+TU4KA_DB=$D/tu4ka.db .venv/bin/python -m uvicorn server.main:app --port 8765 > $D/uvicorn.log 2>&1 &
 sleep 3 && curl -s localhost:8765/healthz
 ```
 
@@ -172,7 +173,7 @@ hostname tu4ka`), ключа `~/.ssh/tu4ka` там тоже нет. Это ог�
 
 ## 7. Прибери за собой
 
-`preview_stop`, погаси uvicorn (`pkill -f 'uvicorn main:app --app-dir server'`
+`preview_stop`, погаси uvicorn (`pkill -f 'uvicorn server.main:app'`
 или по PID), удали `$D`. Стенд не должен остаться висеть.
 
 ## 8. Отчёт

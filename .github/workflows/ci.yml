@@ -29,7 +29,9 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - run: pip install -r requirements-dev.txt
       - name: Syntax check
-        run: python -m py_compile server/*.py
+        # compileall, а не py_compile server/*.py: после пакетирования часть кода
+        # лежит в server/routes/, и glob по одному уровню её не видел бы.
+        run: python -m compileall -q server
       - name: Unit tests
         run: pytest -q
 

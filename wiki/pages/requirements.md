@@ -2,7 +2,7 @@
 
 Свод действующих требований — то, что система обязана делать и чего в ней
 нельзя ломать. Собран из [CLAUDE.md](../../CLAUDE.md), [README.md](../../README.md),
-страниц вики и фактического кода (`server/main.py`, `server/aqi.py`,
+страниц вики и фактического кода (пакет `server/`, `server/aqi.py`,
 `server/static/index.html`) на 2026-08-03.
 
 Это источник для ручной приёмки: субагент `tester`
@@ -77,7 +77,7 @@
 
 | ID | Требование | Как |
 |----|------------|-----|
-| O1 | Push в `main` → CI (`py_compile` + pytest) → автодеплой. Красные тесты блокируют деплой | manual |
+| O1 | Push в `main` → CI (`compileall` + pytest) → автодеплой. Красные тесты блокируют деплой | manual |
 | O2 | `deploy/remote_setup.sh` идемпотентен; креды push в `/etc/tu4ka/env` генерируются один раз и при повторном прогоне не перегенерируются | manual |
 | O3 | Пароль push на сервере обязан совпадать с прошитым в датчике — иначе датчик молча перестанет доставлять данные | manual |
 | O4 | БД `/var/lib/tu4ka/tu4ka.db` лежит вне `/opt/tu4ka`, чтобы `rsync --delete` при деплое её не задел | manual |
@@ -93,4 +93,5 @@
   [dashboard-metric-selector](dashboard-metric-selector.md),
   [frontend-redesign](frontend-redesign.md), [deploy-cicd](deploy-cicd.md),
   [roadmap](roadmap.md);
-- код: `server/main.py`, `server/aqi.py`, `server/static/index.html`, `tests/`.
+- код: пакет `server/` (`main.py`, `db.py`, `auth.py`, `history.py`, `routes/`),
+  `server/aqi.py`, `server/static/index.html`, `tests/`.
