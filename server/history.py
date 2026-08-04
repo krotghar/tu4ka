@@ -14,6 +14,7 @@ PERIODS = {  # период истории -> (длина скользящего
     "all": (None, 15 * 86400),
 }
 MAX_TZ_OFFSET = 14 * 60  # минут; реальные зоны укладываются в UTC-12..UTC+14
+HOURS_PROFILE_DAYS = 7  # профиль суток: за сколько последних суток усредняем часы
 
 
 def period_window(now: int, period: str, tz_offset: int, first_ts: int | None) -> tuple[int, int]:
@@ -82,3 +83,41 @@ def build_history(conn, period: str, tz_offset: int, now: int) -> dict:
         points.append(p)
     return {"period": period, "bucket_s": bucket, "start": start, "end": now,
             "first_ts": first_ts, "points": points}
+
+
+def build_hours_profile(conn, tz_offset: int, now: int) -> dict:
+    """Тело ответа /api/v1/hours: средний профиль суток за последние 7 дней.
+
+    Не срез последних 24 часов, а именно профиль: каждый час местных суток
+    усредняется по всем суткам окна. Поэтому простой датчика (свет выключили,
+    связь отвалилась) размазывается по остальным дням и не выедает из блока
+    «худшие часы» дыру — в отличие от прежнего расчёта по одному окну 24h,
+    где на каждый час суток приходилась ровно одна корзина.
+
+    Окно кончается на границе текущего часа по tz-сдвинутой сетке (как и корзины
+    /history) и тянется на HOURS_PROFILE_DAYS суток назад. Сетка часов плотная:
+    час без измерений отдаётся с null и n=0.
+    """
+    shift = tz_offset * 60
+    end = ((now + shift) // 3600) * 3600 - shift
+    start = end - HOURS_PROFILE_DAYS * 86400
+    rows = conn.execute(
+        "SELECT ((ts+?)/3600)%24 AS hour, round(avg(pm25),2) AS pm25,"
+        " round(avg(pm10),2) AS pm10, count(*) AS n,"
+        " count(DISTINCT (ts+?)/86400) AS days"
+        " FROM measurements WHERE ts >= ? AND ts < ? GROUP BY hour",
+        (shift, shift, start, end),
+    ).fetchall()
+    by_hour = {r["hour"]: dict(r) for r in rows}
+    hours = []
+    for h in range(24):
+        p = by_hour.get(h) or {"hour": h, "pm25": None, "pm10": None, "n": 0, "days": 0}
+        p["aqi"] = aqi.compute(p["pm25"], p["pm10"])["aqi"]  # AQI по средним PM часа
+        hours.append(p)
+    days_covered = conn.execute(
+        "SELECT count(DISTINCT (ts+?)/86400) AS days FROM measurements"
+        " WHERE ts >= ? AND ts < ?",
+        (shift, start, end),
+    ).fetchone()["days"]
+    return {"window_days": HOURS_PROFILE_DAYS, "tz_offset": tz_offset,
+            "start": start, "end": end, "days_covered": days_covered, "hours": hours}

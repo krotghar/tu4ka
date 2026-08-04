@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Лицензия данных — Тучка</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>☁️</text></svg>">
+<link rel="stylesheet" href="/static/legal/legal.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="legal-head">
+    <p class="brand"><a href="/">Тучка</a></p>
+    <div class="legal-lang">
+      <a href="/legal/license" class="active">RU</a>
+      <a href="/en/legal/license">EN</a>
+    </div>
+  </div>
+  <div class="legal-nav">
+    <a href="/legal/terms">Условия использования</a>
+    <a href="/legal/privacy">Политика конфиденциальности</a>
+    <a href="/legal/license">Лицензия данных</a>
+  </div>
+
+  <h1>Лицензия данных</h1>
+  <p class="legal-meta">Версия 1.0 — 2026-08-04</p>
+
+  <h2>1. Что покрывает эта лицензия</h2>
+  <p>Публикуемые измерения (PM2.5, PM10, температура, влажность, давление),
+  производные агрегаты (часовые сводки, индекс AQI) и публичные (смещённые)
+  координаты датчиков распространяются под лицензией
+  <a href="https://creativecommons.org/licenses/by/4.0/">Creative Commons
+  Attribution 4.0 International (CC BY 4.0)</a>. Эта страница описывает
+  лицензию только на данные — исходный код сервиса ей не покрывается.</p>
+
+  <h2>2. Атрибуция</h2>
+  <p>При использовании данных укажите источник, например:</p>
+  <p><code>Данные качества воздуха: «Тучка» (amqi.am), CC BY 4.0</code></p>
+
+  <h2>3. Ориентировочный характер измерений</h2>
+  <p>Все данные — <strong>ориентировочные измерения (indicative
+  measurements)</strong> с бытовых датчиков airRohr (SDS011 + BME280/BMP280),
+  а не с референсных станций контроля качества воздуха. Показания подвержены
+  дрейфу сенсора, условиям установки и погрешностям недорогих оптических
+  датчиков пыли.</p>
+
+  <h2>4. Почему CC BY 4.0, а не ODbL или DbCL</h2>
+  <p>CC BY 4.0, в отличие от версии 3.0, явно распространяется в том числе на
+  sui generis право на базу данных, что делает лицензирование самих данных
+  недвусмысленным. ODbL (Open Database License) добавляет требование
+  share-alike и уведомлений (notices) для производных баз данных — это
+  барьер для стороннего потребителя данных, которого мы хотим избежать. DbCL
+  (Database Contents License) — фактически публичное достояние на содержимое
+  базы, при котором атрибуция становится необязательной, а не желательной.</p>
+  <p>Показателен пример: у sensor.community на странице
+  sensor.community/en/legal/ заявлена «Database Contents License (ODbL 1.0)»,
+  но ссылка ведёт на текст лицензии DbCL 1.0 (opendatacommons.org) — то есть
+  название и текст лицензии у них расходятся. Мы намеренно держим название
+  лицензии и ссылку на её текст согласованными.</p>
+
+  <footer class="legal-footer">
+    <a href="/legal/terms">Условия использования</a> ·
+    <a href="/legal/privacy">Политика конфиденциальности</a> ·
+    <a href="/">На главную</a>
+  </footer>
+</div>
+</body>
+</html>

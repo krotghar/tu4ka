@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 import pytest
 
 from conftest import PUSH_PASS, PUSH_USER
-from server import auth, history
+from server import aqi, auth, history
 from server.routes import push as push_routes
 
 # Опорный момент: среда 2026-03-11 15:20:00 UTC. Среда — чтобы «неделя с
@@ -700,6 +700,132 @@ def test_history_drops_measurements_newer_than_end(client, insert_measurement,
     assert all(p["n"] == 0 for p in d["points"])
     # строка при этом в БД есть — потерялась именно выдача
     assert client.get("/healthz").json()["rows"] == 1
+
+
+# --------------------------------------------------------------------------
+# /api/v1/hours — профиль суток
+# --------------------------------------------------------------------------
+
+def _hours_window(tz_offset=0):
+    """Границы окна профиля на замороженном NOW — как их считает history.
+
+    Окно кончается на границе текущего часа, поэтому start приходится не на
+    полночь (на NOW — на 15:00 UTC): индекс столбика считать через _hour_of.
+    """
+    shift = tz_offset * 60
+    end = ((NOW + shift) // 3600) * 3600 - shift
+    return end - history.HOURS_PROFILE_DAYS * 86400, end
+
+
+def _hour_of(ts, tz_offset=0):
+    """Номер столбика профиля, в который попадает измерение."""
+    return ((ts + tz_offset * 60) // 3600) % 24
+
+
+def test_hours_profile_is_dense_on_empty_db(client, frozen_now):
+    """24 часа по возрастанию, час без измерений — null и n=0, дыр в JSON нет."""
+    d = client.get("/api/v1/hours").json()
+    start, end = _hours_window()
+    assert (d["window_days"], d["tz_offset"]) == (7, 0)
+    assert (d["start"], d["end"]) == (start, end)
+    assert d["days_covered"] == 0
+    assert [h["hour"] for h in d["hours"]] == list(range(24))
+    assert all(h["aqi"] is None and h["pm25"] is None and h["pm10"] is None
+               and h["n"] == 0 and h["days"] == 0 for h in d["hours"])
+
+
+def test_hours_profile_survives_a_full_day_gap(client, insert_measurement, frozen_now):
+    """Ради чего всё затевалось: сутки простоя не выедают в профиле дыру.
+
+    Датчик писал шесть суток и замолчал на последние 24 часа (свет выключили).
+    Прежний расчёт по одному окну 24h оставил бы 24 пустых столбика; профиль
+    усредняет по суткам окна, так что заполнены все часы.
+    """
+    _, end = _hours_window()
+    for i in range(25, 7 * 24 + 1):  # от 25 часов назад до края окна
+        insert_measurement(ts=end - i * 3600, pm25=10.0, pm10=20.0)
+
+    d = client.get("/api/v1/hours").json()
+    assert all(h["aqi"] is not None and h["n"] > 0 for h in d["hours"])
+    assert d["days_covered"] == 7  # шесть полных суток + хвост седьмых
+
+    # при этом окно 24h честно пустое — сводка за сутки это и покажет
+    day = client.get("/api/v1/history", params={"period": "24h"}).json()
+    assert all(p["aqi"] is None for p in day["points"])
+
+
+def test_hours_profile_fills_only_hours_with_data(client, insert_measurement,
+                                                  frozen_now):
+    start, _ = _hours_window()
+    ts = start + 9 * 3600 + 600
+    h = _hour_of(ts)
+    insert_measurement(ts=ts, pm25=12.0, pm10=24.0)
+
+    hours = client.get("/api/v1/hours").json()["hours"]
+    assert hours[h]["n"] == 1 and hours[h]["pm25"] == 12.0
+    assert hours[h]["aqi"] == aqi.compute(12.0, 24.0)["aqi"]
+    assert all(x["n"] == 0 and x["aqi"] is None for x in hours if x["hour"] != h)
+
+
+def test_hours_profile_groups_by_local_hour_not_utc(client, insert_measurement,
+                                                    frozen_now):
+    """Час считается по местному времени клиента (tz_offset), а не по UTC.
+
+    На tz_offset=0 регрессия не видна — берём UTC+5:30, где часы расходятся:
+    20:00 UTC — это 01:30 по месту, то есть столбик 01, а не 20.
+    """
+    insert_measurement(ts=_ts(2026, 3, 10, 20, 0), pm25=15.0, pm10=30.0)
+
+    hours = client.get("/api/v1/hours", params={"tz_offset": 330}).json()["hours"]
+    assert hours[1]["n"] == 1
+    assert hours[20]["n"] == 0
+
+
+def test_hours_profile_window_is_seven_days(client, insert_measurement, frozen_now):
+    """Измерение старше окна в профиль не попадает, свежее — попадает."""
+    start, _ = _hours_window()
+    insert_measurement(ts=start - 3600, pm25=99.0, pm10=99.0)  # за краем окна
+    insert_measurement(ts=start + 3600, pm25=10.0, pm10=20.0)
+
+    hours = client.get("/api/v1/hours").json()["hours"]
+    assert sum(h["n"] for h in hours) == 1
+    assert hours[_hour_of(start + 3600)]["pm25"] == 10.0
+
+
+def test_hours_profile_aqi_is_computed_from_average_pm(client, insert_measurement,
+                                                       frozen_now):
+    """AQI часа — по средним PM часа, как у корзины /history (A4), а не среднее
+    от AQI отдельных измерений: на разбросе 1 → 100 это разные числа."""
+    start, _ = _hours_window()
+    insert_measurement(ts=start + 3600, pm25=1.0)
+    insert_measurement(ts=start + 86400 + 3600, pm25=100.0)  # тот же час, другие сутки
+
+    hour = client.get("/api/v1/hours").json()["hours"][_hour_of(start + 3600)]
+    assert hour["pm25"] == 50.5
+    assert hour["aqi"] == aqi.compute(50.5, None)["aqi"]
+    mean_of_aqi = (aqi.compute(1.0, None)["aqi"] + aqi.compute(100.0, None)["aqi"]) / 2
+    assert hour["aqi"] != round(mean_of_aqi)
+
+
+def test_hours_profile_counts_days(client, insert_measurement, frozen_now):
+    """days — сколько разных суток окна дали данные в этот час; days_covered —
+    сколько суток окна вообще с данными."""
+    start, _ = _hours_window()
+    for day in range(3):
+        insert_measurement(ts=start + day * 86400 + 5 * 3600, pm25=10.0)
+        insert_measurement(ts=start + day * 86400 + 5 * 3600 + 60, pm25=10.0)
+    insert_measurement(ts=start + 86400 + 7 * 3600, pm25=10.0)  # те же вторые сутки
+
+    d = client.get("/api/v1/hours").json()
+    assert d["hours"][5]["n"] == 6 and d["hours"][5]["days"] == 3
+    assert d["hours"][7]["n"] == 1 and d["hours"][7]["days"] == 1
+    assert d["days_covered"] == 3
+
+
+def test_hours_profile_rejects_bad_tz_offset(client):
+    r = client.get("/api/v1/hours", params={"tz_offset": 900})
+    assert r.status_code == 400
+    assert "tz_offset must be within" in r.json()["detail"]
 
 
 # --------------------------------------------------------------------------

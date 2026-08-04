@@ -10,7 +10,8 @@ from .. import aqi, db
 # попадает в operationId OpenAPI, так что переименовывать его ради импорта модуля
 # нельзя. PERIODS/MAX_TZ_OFFSET — константы, build_history — чистая функция;
 # в отличие от db.DB_PATH и auth.PUSH_* их никто не подменяет в тестах.
-from ..history import MAX_TZ_OFFSET, PERIODS, build_history
+from ..history import (MAX_TZ_OFFSET, PERIODS, build_history,
+                       build_hours_profile)
 
 router = APIRouter()
 
@@ -82,6 +83,32 @@ def history(period: str = "24h", tz_offset: int = 0):
     now = int(time.time())
     with closing(db.connect()) as conn:
         return build_history(conn, period, tz_offset, now)
+
+
+@router.get("/api/v1/hours")
+def hours(tz_offset: int = 0):
+    """Средний профиль суток за последние 7 дней: 24 часа местного времени.
+
+    Для каждого часа местных суток — среднее PM за все сутки окна и мгновенный
+    AQI по этим средним (тот же метод, что у корзины /history, см. /docs). Это
+    не срез последних 24 часов: усреднение по нескольким суткам держит блок
+    «худшие часы» заполненным, даже если датчик несколько часов молчал.
+
+    tz_offset — как в /history: минут к востоку от UTC, по нему же сдвинута
+    граница часа, на которой кончается окно. Сетка часов плотная: час без
+    измерений отдаётся с `aqi`/`pm25`/`pm10` = null и `n` = 0.
+
+    `n` — число измерений, попавших в этот час за всё окно; `days` — сколько
+    разных суток окна дали данные в этот час; `days_covered` — сколько суток
+    окна вообще с данными (фронт подписывает им блок).
+    """
+    if not -MAX_TZ_OFFSET <= tz_offset <= MAX_TZ_OFFSET:
+        raise HTTPException(
+            status_code=400,
+            detail=f"tz_offset must be within ±{MAX_TZ_OFFSET} minutes")
+    now = int(time.time())
+    with closing(db.connect()) as conn:
+        return build_hours_profile(conn, tz_offset, now)
 
 
 @router.get("/healthz", include_in_schema=False)

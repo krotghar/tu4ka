@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Tuchka</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>☁️</text></svg>">
+<link rel="stylesheet" href="/static/legal/legal.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="legal-head">
+    <p class="brand"><a href="/">Tuchka</a></p>
+    <div class="legal-lang">
+      <a href="/legal/privacy">RU</a>
+      <a href="/en/legal/privacy" class="active">EN</a>
+    </div>
+  </div>
+  <div class="legal-nav">
+    <a href="/en/legal/terms">Terms of Service</a>
+    <a href="/en/legal/privacy">Privacy Policy</a>
+    <a href="/en/legal/license">Data License</a>
+  </div>
+
+  <h1>Privacy Policy</h1>
+  <p class="legal-meta">Version 1.0 — 2026-08-04</p>
+
+  <h2>1. Data controller</h2>
+  <p>Personal data processing for the "Tuchka" service is carried out by
+  Nikita Leonov. Contact for data processing, access, and deletion requests:
+  <a href="mailto:krotghar@gmail.com">krotghar@gmail.com</a>. Processing is
+  carried out in accordance with the Law of the Republic of Armenia "On
+  Protection of Personal Data" (HO-49-N).</p>
+
+  <h2>2. What data is collected today</h2>
+  <p>At the current stage (a single sensor, no user accounts yet), the service
+  only collects technical web server logs: IP address, User-Agent, requested
+  path, and referrer. Logs are kept for <strong>14 days</strong> and are
+  removed automatically on rotation.</p>
+
+  <h2>3. What data will be collected once registration opens</h2>
+  <p>Once the service opens registration for third-party sensors, it will
+  additionally process: a Telegram account identifier (<code>tg_user_id</code>),
+  a display name, an email address where applicable; the private address and
+  exact installation coordinate of a sensor; a session cookie for signing in
+  to the account dashboard. The legal basis is consent given at registration
+  and necessity for providing the service.</p>
+
+  <h2>4. Measurement retention periods</h2>
+  <p>The raw JSON payload from the sensor (<code>measurements_raw</code>) is
+  kept for 7 days; detailed measurements (<code>measurements</code>) for 90
+  days; hourly aggregates (<code>measurements_hourly</code>) are kept
+  indefinitely in de-identified form, without any link to the owner.</p>
+
+  <h2>5. Disclosure to third parties</h2>
+  <p>Data is not shared with third parties. The service runs on its own VPS;
+  Cloudflare is used only as a DNS provider, without proxying traffic. The
+  sensor firmware's parallel submission of measurements to sensor.community
+  and madavi.de happens directly from the device and does not pass through
+  our service.</p>
+
+  <h2>6. Cookies</h2>
+  <p>Only one strictly necessary session cookie is used, for signing in to the
+  account dashboard. There are no analytics or advertising cookies.</p>
+
+  <h2>7. Data subject rights</h2>
+  <p>You may request information about the processing of your data, and its
+  correction or deletion. The operator responds to a deletion request within
+  <strong>5 days</strong>, and to a request to correct inaccurate data within
+  <strong>3 business days</strong> (timelines under Art. 20 HO-49-N).</p>
+
+  <h2 id="deletion">8. Account deletion</h2>
+  <p>Deleting an account removes: the email address, display name, the
+  sensor's exact installation coordinate, and the link between "sensor" and
+  "person". De-identified historical measurements from the sensor are
+  retained, and the sensor itself is set to <code>retired</code> status and
+  removed from the public map.</p>
+
+  <h2>9. Special categories of data</h2>
+  <p>The service does not collect or process biometric data or special
+  categories of personal data, so prior notification of the authorized body
+  under Art. 23 HO-49-N is not required.</p>
+
+  <h2>10. Complaints</h2>
+  <p>A complaint about personal data processing may be filed with the
+  Personal Data Protection Agency of the Ministry of Justice of the Republic
+  of Armenia.</p>
+
+  <footer class="legal-footer">
+    <a href="/en/legal/terms">Terms of Service</a> ·
+    <a href="/en/legal/license">Data License</a> ·
+    <a href="/">Home</a>
+  </footer>
+</div>
+</body>
+</html>

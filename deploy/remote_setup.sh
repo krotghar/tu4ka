@@ -82,11 +82,32 @@ nginx -t
 "$ROOT/venv/bin/pip" install -q -r "$ROOT/deploy/requirements.txt"
 
 # --- креды push -------------------------------------------------------------
-# Генерируются один раз: прод-пароль прошит в датчике, перегенерация оторвала бы
-# приём. У беты свой независимый пароль.
-if [ ! -f "$ETC/env" ]; then
-    PUSH_PASS=$(openssl rand -hex 16)
-    printf 'TU4KA_DB=%s/tu4ka.db\nTU4KA_PUSH_USER=tu4ka\nTU4KA_PUSH_PASS=%s\n' "$DB_DIR" "$PUSH_PASS" > "$ETC/env"
+# Прод: генерируются один раз. Прод-пароль прошит в датчике, перегенерация
+# оторвала бы приём.
+if [ "$ENV" = prod ]; then
+    if [ ! -f "$ETC/env" ]; then
+        PUSH_PASS=$(openssl rand -hex 16)
+        printf 'TU4KA_DB=%s/tu4ka.db\nTU4KA_PUSH_USER=tu4ka\nTU4KA_PUSH_PASS=%s\n' "$DB_DIR" "$PUSH_PASS" > "$ETC/env"
+        chmod 600 "$ETC/env"
+    fi
+else
+    # Бета: креды не свои, а зеркало прода, и переписываются на каждом прогоне.
+    # nginx зеркалит пуш на :8001 как есть, вместе с заголовком Authorization
+    # прода, — с собственным паролем бета отвечала бы 401 на каждое измерение.
+    # Направление то же одностороннее, что и у пересева БД: читаем прод, ничего
+    # ему не пишем.
+    [ -f /etc/tu4ka/env ] || {
+        echo "нет /etc/tu4ka/env — сначала выкатите прод" >&2
+        exit 1
+    }
+    PUSH_USER=$(sed -n 's/^TU4KA_PUSH_USER=//p' /etc/tu4ka/env)
+    PUSH_PASS=$(sed -n 's/^TU4KA_PUSH_PASS=//p' /etc/tu4ka/env)
+    [ -n "$PUSH_PASS" ] || {
+        echo "в /etc/tu4ka/env нет TU4KA_PUSH_PASS — бета не примет зеркало" >&2
+        exit 1
+    }
+    printf 'TU4KA_DB=%s/tu4ka.db\nTU4KA_PUSH_USER=%s\nTU4KA_PUSH_PASS=%s\n' \
+        "$DB_DIR" "$PUSH_USER" "$PUSH_PASS" > "$ETC/env"
     chmod 600 "$ETC/env"
 fi
 

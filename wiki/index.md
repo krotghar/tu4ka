@@ -19,7 +19,7 @@
 - [dashboard-metric-selector](pages/dashboard-metric-selector.md) — шесть карточек и один график: `METRIC_DEFS`, шаги осей, цвет и лента разброса по метрике, курсор и тултип, откуда берётся макет
 - [deploy-cicd](pages/deploy-cicd.md) — VPS, systemd, автодеплой через CI, ключ деплоя
 - [domain-dns](pages/domain-dns.md) — домен `amqi.am`, зона в Cloudflare через name.am, A-записи и почему проксирование намеренно выключено
-- [nginx-tls-beta](pages/nginx-tls-beta.md) — nginx впереди, TLS через webroot-certbot, вторая среда `beta.amqi.am`: раскладка сред, socket activation ради выкладки без даунтайма, пересев БД беты, неприкосновенный путь датчика
+- [nginx-tls-beta](pages/nginx-tls-beta.md) — nginx впереди, TLS через webroot-certbot, вторая среда `beta.amqi.am`: раскладка сред, socket activation ради выкладки без даунтайма, зеркало пуша и пересев БД беты, неприкосновенный путь датчика
 
 ## Roadmap/решения
 

@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import auth, db
 from .routes import api as api_routes
+from .routes import public as public_routes
 from .routes import push as push_routes
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -44,6 +45,7 @@ app.mount("/static", StaticFiles(directory=os.path.join(APP_DIR, "static")), nam
 
 app.include_router(push_routes.router)
 app.include_router(api_routes.router)
+app.include_router(public_routes.router)
 
 
 @app.get("/", include_in_schema=False)

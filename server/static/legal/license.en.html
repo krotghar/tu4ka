@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data License — Tuchka</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>☁️</text></svg>">
+<link rel="stylesheet" href="/static/legal/legal.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="legal-head">
+    <p class="brand"><a href="/">Tuchka</a></p>
+    <div class="legal-lang">
+      <a href="/legal/license">RU</a>
+      <a href="/en/legal/license" class="active">EN</a>
+    </div>
+  </div>
+  <div class="legal-nav">
+    <a href="/en/legal/terms">Terms of Service</a>
+    <a href="/en/legal/privacy">Privacy Policy</a>
+    <a href="/en/legal/license">Data License</a>
+  </div>
+
+  <h1>Data License</h1>
+  <p class="legal-meta">Version 1.0 — 2026-08-04</p>
+
+  <h2>1. What this license covers</h2>
+  <p>Published measurements (PM2.5, PM10, temperature, humidity, pressure),
+  derived aggregates (hourly summaries, the AQI index), and public (offset)
+  sensor coordinates are distributed under the
+  <a href="https://creativecommons.org/licenses/by/4.0/">Creative Commons
+  Attribution 4.0 International (CC BY 4.0)</a> license. This page describes
+  the license for the data only — the service's source code is not covered by
+  it.</p>
+
+  <h2>2. Attribution</h2>
+  <p>When using this data, please credit the source, for example:</p>
+  <p><code>Air quality data: "Tuchka" (amqi.am), CC BY 4.0</code></p>
+
+  <h2>3. Indicative nature of the measurements</h2>
+  <p>All data consists of <strong>indicative measurements</strong> from
+  consumer-grade airRohr sensors (SDS011 + BME280/BMP280), not from
+  reference-grade air quality monitoring stations. Readings are subject to
+  sensor drift, installation conditions, and the inherent inaccuracy of
+  low-cost optical particulate sensors.</p>
+
+  <h2>4. Why CC BY 4.0, not ODbL or DbCL</h2>
+  <p>CC BY 4.0, unlike version 3.0, explicitly extends to the sui generis
+  database right, which makes licensing the data itself unambiguous. ODbL
+  (Open Database License) adds a share-alike requirement and notice
+  obligations for derivative databases — a barrier for downstream data
+  consumers that we want to avoid. DbCL (Database Contents License) is
+  effectively a public-domain dedication for database contents, under which
+  attribution becomes optional rather than expected.</p>
+  <p>A telling example: sensor.community's legal page states a "Database
+  Contents License (ODbL 1.0)" but links to the text of DbCL 1.0
+  (opendatacommons.org) — the stated name and the linked license text
+  disagree. We deliberately keep our license's name and its linked text
+  consistent.</p>
+
+  <footer class="legal-footer">
+    <a href="/en/legal/terms">Terms of Service</a> ·
+    <a href="/en/legal/privacy">Privacy Policy</a> ·
+    <a href="/">Home</a>
+  </footer>
+</div>
+</body>
+</html>
