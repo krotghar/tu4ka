@@ -10,6 +10,12 @@ LEGAL_DIR = Path(__file__).resolve().parent.parent / "server" / "static" / "lega
 RU_SLUGS = ["terms", "privacy", "license"]
 EN_SLUGS = ["terms", "privacy", "license"]
 
+ALL_LEGAL_FILES = [
+    "terms.ru.html", "terms.en.html",
+    "privacy.ru.html", "privacy.en.html",
+    "license.ru.html", "license.en.html",
+]
+
 # Абсолютные URL, на которые страницам можно ссылаться, не будучи "внешним доменом".
 # www.w3.org — не запрос, а namespace URI инлайновой SVG-фавиконки (как в index.html).
 ALLOWED_EXTERNAL_HOSTS = ("creativecommons.org", "www.w3.org")
@@ -49,17 +55,30 @@ def test_path_traversal_attempts_are_404(client, attempt):
     assert r.status_code == 404
 
 
-@pytest.mark.parametrize("filename", [
-    "terms.ru.html", "terms.en.html",
-    "privacy.ru.html", "privacy.en.html",
-    "license.ru.html", "license.en.html",
-])
-def test_pages_contain_operator_contact_cc_by_and_indicative(filename):
+@pytest.mark.parametrize("filename", ALL_LEGAL_FILES)
+def test_pages_are_versioned(filename):
+    text = (LEGAL_DIR / filename).read_text(encoding="utf-8")
+    assert re.search(r"Version|Версия", text)
+
+
+@pytest.mark.parametrize("filename", ["terms.ru.html", "terms.en.html",
+                                       "privacy.ru.html", "privacy.en.html"])
+def test_terms_and_privacy_name_the_operator_contact(filename):
     text = (LEGAL_DIR / filename).read_text(encoding="utf-8")
     assert "krotghar@gmail.com" in text
-    assert "creativecommons.org/licenses/by/4.0/" in text
+
+
+@pytest.mark.parametrize("filename", ["terms.ru.html", "terms.en.html",
+                                       "license.ru.html", "license.en.html"])
+def test_terms_and_license_state_indicative_measurements(filename):
+    text = (LEGAL_DIR / filename).read_text(encoding="utf-8")
     assert re.search(r"[Ii]ndicative", text)
-    assert re.search(r"Version|Версия", text)
+
+
+@pytest.mark.parametrize("filename", ["license.ru.html", "license.en.html"])
+def test_license_pages_link_cc_by(filename):
+    text = (LEGAL_DIR / filename).read_text(encoding="utf-8")
+    assert "creativecommons.org/licenses/by/4.0/" in text
 
 
 def test_terms_pages_contain_the_license_grant():
@@ -81,11 +100,7 @@ def test_dashboard_links_only_existing_legal_routes(client):
         assert slug in RU_SLUGS, f"дашборд ссылается на несуществующий /legal/{slug}"
 
 
-@pytest.mark.parametrize("filename", [
-    "terms.ru.html", "terms.en.html",
-    "privacy.ru.html", "privacy.en.html",
-    "license.ru.html", "license.en.html",
-])
+@pytest.mark.parametrize("filename", ALL_LEGAL_FILES)
 def test_no_external_domains_besides_allowlist(filename):
     text = (LEGAL_DIR / filename).read_text(encoding="utf-8")
     for url in re.findall(r'https?://([a-zA-Z0-9.-]+)', text):

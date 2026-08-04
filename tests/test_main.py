@@ -817,8 +817,9 @@ def test_hours_profile_counts_days(client, insert_measurement, frozen_now):
     insert_measurement(ts=start + 86400 + 7 * 3600, pm25=10.0)  # те же вторые сутки
 
     d = client.get("/api/v1/hours").json()
-    assert d["hours"][5]["n"] == 6 and d["hours"][5]["days"] == 3
-    assert d["hours"][7]["n"] == 1 and d["hours"][7]["days"] == 1
+    every_day, once = _hour_of(start + 5 * 3600), _hour_of(start + 7 * 3600)
+    assert d["hours"][every_day]["n"] == 6 and d["hours"][every_day]["days"] == 3
+    assert d["hours"][once]["n"] == 1 and d["hours"][once]["days"] == 1
     assert d["days_covered"] == 3
 
 

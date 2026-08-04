@@ -211,7 +211,9 @@ button, input { font-family: inherit; }
 
 .hours { display: flex; align-items: flex-end; gap: 2px; height: 52px; margin-top: 14px; }
 .hours .bar { flex: 1; border-radius: 2px 2px 0 0; background: var(--line-soft); min-height: 3px; }
+.hours-empty { align-self: center; font-size: 13.5px; color: var(--muted); }
 .hours-labels { display: flex; justify-content: space-between; margin-top: 7px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+.hours-labels[hidden] { display: none; }
 
 .summary-row { display: flex; align-items: baseline; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
 .summary-row:last-child { border-bottom: 0; }
@@ -334,10 +336,10 @@ footer a { margin-left: auto; }
         <div class="hero-section">
           <div class="hero-section-head">
             <h2>Худшие часы</h2>
-            <span class="u">по часам суток</span>
+            <span class="u" id="hours-caption">по часам суток</span>
           </div>
           <div class="hours" id="hours"></div>
-          <div class="hours-labels"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
+          <div class="hours-labels" id="hours-labels"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
         </div>
 
         <div class="hero-section">
@@ -567,7 +569,8 @@ function timeLabel(tSec, period, full) {
 let period = "24h";
 let activeMetric = "aqi";  // ключ показателя, который сейчас на большом графике
 let mainHistory = null;   // /history для выбранного периода
-let dayHistory = null;    // /history?period=24h — всегда, для «худших часов» и сводки
+let dayHistory = null;    // /history?period=24h — всегда, для сводки за сутки
+let hoursProfile = null;  // /api/v1/hours — профиль суток за 7 дней, «худшие часы»
 let historyGen = 0;
 let historyRetry = null;
 let current = null;       // последний ответ /api/v1/current
@@ -644,37 +647,57 @@ function renderHero() {
   ).join("");
 }
 
-function renderDaySummary() {
-  const pts = (dayHistory && dayHistory.points) || [];
-  const byHour = {};
-  for (const p of pts) {
-    if (p.aqi == null) continue;
-    const h = new Date(p.t * 1000).getHours();
-    (byHour[h] = byHour[h] || []).push(p.aqi);
+const pad2 = n => (n < 10 ? "0" + n : "" + n);
+
+/* «1 день / 2 дня / 5 дней» — обычное русское правило. */
+function plural(n, one, few, many) {
+  const mod100 = n % 100, mod10 = n % 10;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
+/* Столбики «худших часов» — профиль суток из /api/v1/hours: каждый час усреднён
+   по нескольким суткам. Специально не по окну 24h: там на час суток приходится
+   ровно одна корзина, и любой простой датчика оставлял бы в блоке дыру. */
+function renderHoursProfile() {
+  const hours = (hoursProfile && hoursProfile.hours) || [];
+  const vals = hours.length === 24 ? hours.map(h => h.aqi) : new Array(24).fill(null);
+  const nums = vals.filter(v => v != null);
+  const days = (hoursProfile && hoursProfile.days_covered) || 0;
+  $("#hours-labels").hidden = !nums.length;
+  if (!nums.length) {
+    $("#hours-caption").textContent = "по часам суток";
+    $("#hours").innerHTML = `<div class="hours-empty">Пока мало данных</div>`;
+    return;
   }
-  const hourVals = [];
-  for (let h = 0; h < 24; h++) {
-    const arr = byHour[h];
-    hourVals.push(arr ? arr.reduce((s, x) => s + x, 0) / arr.length : null);
-  }
-  const hourMax = Math.max(...hourVals.filter(x => x != null), 50);
-  $("#hours").innerHTML = hourVals.map(val => {
+  $("#hours-caption").textContent = days > 1
+    ? `среднее за ${days} ${plural(days, "день", "дня", "дней")}`
+    : "по часам суток";
+  const hourMax = Math.max(...nums, 50);
+  $("#hours").innerHTML = vals.map(val => {
     const height = val == null ? "6%" : Math.max(7, val / hourMax * 100).toFixed(0) + "%";
     const color = val == null ? "var(--line-soft)" : CATS[catKey(val)].line;
     return `<div class="bar" style="height:${height};background:${color}"></div>`;
   }).join("");
+}
 
-  const dayAqi = pts.map(p => p.aqi).filter(v => v != null);
-  const pad2 = n => (n < 10 ? "0" + n : "" + n);
-  if (!dayAqi.length) {
+function renderDaySummary() {
+  const pts = ((dayHistory && dayHistory.points) || []).filter(p => p.aqi != null);
+  if (!pts.length) {
     $("#summary").innerHTML = `<div class="summary-row"><span class="summary-name">Нет данных за 24 часа</span></div>`;
     return;
   }
-  const worstIdx = hourVals.reduce((bi, val, i) => (val != null && (hourVals[bi] == null || val > hourVals[bi]) ? i : bi), 0);
+  const dayAqi = pts.map(p => p.aqi);
+  const min = Math.min(...dayAqi), max = Math.max(...dayAqi);
+  /* час максимума берём у той же корзины, из которой пришло само число, —
+     иначе заметка «в HH:00» и значение рядом расходятся */
+  const worst = pts.reduce((a, p) => (p.aqi > a.aqi ? p : a));
   const rows = [
-    { name: "Минимум", value: Math.round(Math.min(...dayAqi)), note: "", color: CATS[catKey(Math.min(...dayAqi))].line },
+    { name: "Минимум", value: Math.round(min), note: "", color: CATS[catKey(min)].line },
     { name: "Среднее", value: Math.round(dayAqi.reduce((s, x) => s + x, 0) / dayAqi.length), note: "", color: "var(--ink-2)" },
-    { name: "Максимум", value: Math.round(Math.max(...dayAqi)), note: "в " + pad2(worstIdx) + ":00", color: CATS[catKey(Math.max(...dayAqi))].line },
+    { name: "Максимум", value: Math.round(max), note: "в " + pad2(new Date(worst.t * 1000).getHours()) + ":00", color: CATS[catKey(max)].line },
   ];
   $("#summary").innerHTML = rows.map(r =>
     `<div class="summary-row"><span class="summary-name">${r.name}</span>` +
@@ -934,22 +957,30 @@ async function loadCurrent() {
   renderFreshness();
 }
 
+const tzOffsetMin = () => -new Date().getTimezoneOffset();
+
 async function fetchHistory(p) {
-  const tzOffset = -new Date().getTimezoneOffset();
-  const r = await fetch(`/api/v1/history?period=${p}&tz_offset=${tzOffset}`);
+  const r = await fetch(`/api/v1/history?period=${p}&tz_offset=${tzOffsetMin()}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+async function fetchHoursProfile() {
+  const r = await fetch(`/api/v1/hours?tz_offset=${tzOffsetMin()}`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
 async function loadHistory() {
   const gen = ++historyGen;
-  let main, day;
+  let main, day, profile;
   try {
     if (period === "24h") {
-      main = await fetchHistory("24h");
+      [main, profile] = await Promise.all([fetchHistory("24h"), fetchHoursProfile()]);
       day = main;
     } else {
-      [main, day] = await Promise.all([fetchHistory(period), fetchHistory("24h")]);
+      [main, day, profile] = await Promise.all(
+        [fetchHistory(period), fetchHistory("24h"), fetchHoursProfile()]);
     }
   } catch (e) {
     if (!historyRetry) historyRetry = setTimeout(() => { historyRetry = null; loadHistory(); }, 15_000);
@@ -958,10 +989,12 @@ async function loadHistory() {
   if (gen !== historyGen) return; // пришёл ответ на устаревший запрос
   mainHistory = main;
   dayHistory = day;
+  hoursProfile = profile;
   if (day.first_ts != null) dataSpanS = day.end - day.first_ts;
   buildTabs();
   renderChart();
   renderMetrics();
+  renderHoursProfile();
   renderDaySummary();
 }
 
