@@ -51,14 +51,17 @@ U11): даже мелкая правка фронта умеет сломать 
 только когда история длинная. Сид ниже даёт ~400 дней данных, так что видны все
 пять вкладок периода.
 
+Схему приложение само не создаёт — её ставит раннер миграций, и на не
+мигрированной базе uvicorn откажется стартовать (это требование M3, а не
+поломка). Поэтому сид идёт после `python -m server.migrate`.
+
 ```bash
 D=${TMPDIR:-/tmp}/tu4ka-check && rm -rf $D && mkdir -p $D
+TU4KA_DB=$D/tu4ka.db .venv/bin/python -m server.migrate
 TU4KA_DB=$D/tu4ka.db .venv/bin/python - <<'PY'
-import math, os, random, sqlite3, time
+import math, random, sqlite3, time
 from server import db
-os.makedirs(os.path.dirname(db.DB_PATH), exist_ok=True)
 conn = sqlite3.connect(db.DB_PATH)
-conn.executescript(db.SCHEMA)
 random.seed(7)
 now = int(time.time())
 ts_list = [now - ago * 3600 for ago in range(400 * 24, 24, -1)]      # 400 дней по часу
@@ -68,13 +71,14 @@ for ts in ts_list:
     h = (ts % 86400) / 3600
     spike = 25 if (ts // 86400) % 37 == 0 else 0                      # редкие «грязные» сутки
     pm25 = max(1.0, 12 + 9 * math.sin(h / 3.8) + random.gauss(0, 3) + spike)
-    rows.append((ts, "2998975", round(pm25 * 1.7, 2), round(pm25, 2),
+    rows.append((1, ts, "2998975", round(pm25 * 1.7, 2), round(pm25, 2),
                  round(18 + 8 * math.sin(h / 3.8) + random.gauss(0, 1), 2),
                  round(45 + 15 * math.cos(h / 3.8), 2),
-                 round(1008 + 4 * math.sin(ts / 200000), 2), None, "{}"))
+                 round(1008 + 4 * math.sin(ts / 200000), 2), None))
 with conn:
-    conn.executemany("INSERT INTO measurements(ts,sensor_id,pm10,pm25,temperature,"
-                     "humidity,pressure,signal,raw) VALUES(?,?,?,?,?,?,?,?,?)", rows)
+    conn.executemany("INSERT INTO measurements(device_id,ts,sensor_id,pm10,pm25,"
+                     "temperature,humidity,pressure,signal)"
+                     " VALUES(?,?,?,?,?,?,?,?,?)", rows)
 print("seeded", conn.execute("select count(*) from measurements").fetchone()[0])
 PY
 
@@ -85,8 +89,8 @@ sleep 3 && curl -s localhost:8765/healthz
 Порт 8765 занят — возьми соседний свободный и дальше подставляй его.
 Сервер не поднялся — смотри `$D/uvicorn.log`.
 
-Нужен сценарий «пустая база» (U14) — подними второй экземпляр на другом порту с
-`TU4KA_DB=$D/empty.db` и без сида: приложение само создаст схему на старте.
+Нужен сценарий «пустая база» (U14) — подними второй экземпляр на другом порту
+с `TU4KA_DB=$D/empty.db`: прогони по ней миграции и не сей ничего.
 
 ## 4. API руками
 
