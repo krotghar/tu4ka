@@ -7,12 +7,13 @@
 
 ## Требования и приёмка
 
-- [requirements](pages/requirements.md) — свод действующих требований со стабильными ID (P/C/H/Z/D/A/U/O), чек-лист ручной приёмки для субагента `tester`
+- [requirements](pages/requirements.md) — свод действующих требований со стабильными ID (P/C/H/Z/D/A/U/M/Q/O/L), чек-лист ручной приёмки для субагента `tester`
 
 ## Матчасть
 
 - [server-package-layout](pages/server-package-layout.md) — раскладка пакета `server/`: кто каким модулем владеет, почему обращаться к глобалам через модуль, ловушка `rsync --delete` при деплое
 - [protocol-airrohr-push](pages/protocol-airrohr-push.md) — формат `POST /api/v1/push`, маппинг полей, авторизация датчика
+- [per-device-push](pages/per-device-push.md) — приём по кредам устройства: порядок проверки и выравнивание времени, grace при ротации секрета, мост на переменные окружения, почему `chip_id` не маршрутизирует, лимит 3/мин и флаг влажности
 - [db-schema-migrations](pages/db-schema-migrations.md) — версии схемы на `PRAGMA user_version`: почему v1 равна старой схеме, ловушка `executescript`, порядок перестроения таблицы без висящих ссылок, что даёт вынос `raw`, пересев беты как бесплатная репетиция миграции
 - [aqi-nowcast](pages/aqi-nowcast.md) — breakpoints EPA AQI, NowCast vs мгновенный AQI (+ lo/hi разброс), открытый TODO по источнику
 - [history-buckets](pages/history-buckets.md) — скользящие окна `/history`, почему корзины привязаны к tz-сдвинутой сетке, а не к эпохе; `aqi_lo`/`_hi` и `<метрика>_lo`/`_hi` для ленты разброса; профиль суток `/api/v1/hours` и почему «худшие часы» считаются за неделю, а не за последние 24 часа

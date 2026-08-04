@@ -60,7 +60,7 @@ def read(path, sql, args=()):
 
 
 def test_fresh_db_reaches_target_version(fresh_db):
-    assert migrate.run() == [1, 2]
+    assert migrate.run() == [1, 2, 3]
     assert read(fresh_db, "PRAGMA user_version")[0][0] == migrate.TARGET
 
 
@@ -69,7 +69,24 @@ def test_fresh_db_has_all_tables_and_indexes(fresh_db):
     names = {r[0] for r in read(
         fresh_db, "SELECT name FROM sqlite_master WHERE type IN ('table','index')")}
     assert {"devices", "measurements", "measurements_raw"} <= names
-    assert {"idx_measurements_ts", "idx_meas_dev_ts"} <= names
+    assert {"idx_measurements_ts", "idx_meas_dev_ts",
+            "idx_devices_push_user"} <= names
+
+
+def test_push_user_is_unique(fresh_db):
+    """push_user — ключ маршрутизации приёма: двух устройств с одним логином
+    быть не должно, иначе выбор устройства становится «какая строка попадётся»."""
+    migrate.run()
+
+    conn = sqlite3.connect(str(fresh_db))
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            with conn:
+                conn.execute(
+                    "INSERT INTO devices(slug, push_user, created_at)"
+                    " VALUES('другая', 'tu4ka', 0)")
+    finally:
+        conn.close()
 
 
 def test_rerun_is_a_noop(fresh_db):

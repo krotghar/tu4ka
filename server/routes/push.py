@@ -3,6 +3,7 @@
 import json
 import math
 import time
+from collections import deque
 from contextlib import closing
 
 import anyio
@@ -29,16 +30,42 @@ FIELD_MAP = {
 
 MAX_PUSH_BODY = 64 * 1024  # реальный push прошивки ~500 байт
 
-# Пока устройство одно и креды общие. Маршрутизация по устройству из кредов —
-# следующая сессия; здесь константа, чтобы схема с device_id NOT NULL работала,
-# а поведение приёма не изменилось ни на байт.
-DEVICE_ID = 1
+# Штатная тучка шлёт раз в 60 с, так что запас троекратный. Лимит защищает
+# от заклинившей прошивки и от чужого скрипта с утёкшим токеном, а не
+# регулирует поток: понижать его нельзя — потерянное измерение не вернуть.
+RATE_LIMIT_PER_MIN = 3
+RATE_WINDOW_S = 60
+
+# Принятые записи по устройствам, окно скользящее. В памяти процесса, а не
+# в БД: это защита от злоупотребления, а не учёт — рестарт может её обнулить,
+# ничего страшного не случится. Воркер один, гонок нет.
+_accepted: dict[int, deque[float]] = {}
+
+
+def _rate_limited(device_id: int, now: float) -> bool:
+    window = _accepted.get(device_id)
+    if window is None:
+        return False
+    while window and now - window[0] >= RATE_WINDOW_S:
+        window.popleft()
+    return len(window) >= RATE_LIMIT_PER_MIN
+
+
+def _remember_accepted(device_id: int, now: float) -> None:
+    _accepted.setdefault(device_id, deque()).append(now)
 
 
 @router.post("/api/v1/push")
 async def push(request: Request):
     """Приём измерения от прошивки airRohr (формат sensor.community)."""
-    auth.check_push_auth(request)
+    # Резолв ходит в SQLite, а busy_timeout=5000 означает, что под писательским
+    # локом он может задержаться на секунды — держать в это время event loop
+    # нельзя. Проверка кредов идёт до чтения тела, как и раньше.
+    device = await anyio.to_thread.run_sync(
+        auth.resolve_push_device, request.headers.get("authorization", ""))
+    if _rate_limited(device.id, time.time()):
+        raise HTTPException(status_code=429, detail="too many pushes",
+                            headers={"Retry-After": str(RATE_WINDOW_S)})
     chunks, size = [], 0
     async for chunk in request.stream():
         size += len(chunk)
@@ -84,6 +111,7 @@ async def push(request: Request):
 
     def _insert():  # не блокируем event loop, если БД под локом
         with closing(db.connect()) as conn, conn:
+            _note_chip_id(conn, device, sensor_id, ts)
             # ON CONFLICT, а не голый INSERT: idx_meas_dev_ts уникален по
             # (device_id, ts), и второй пуш в ту же секунду иначе вернул бы
             # прошивке 500. Она не переспрашивает — пусть поздний пуш
@@ -96,7 +124,7 @@ async def push(request: Request):
                 " pm25=excluded.pm25, temperature=excluded.temperature,"
                 " humidity=excluded.humidity, pressure=excluded.pressure,"
                 " signal=excluded.signal RETURNING id",
-                (DEVICE_ID, ts, sensor_id, row.get("pm10"), row.get("pm25"),
+                (device.id, ts, sensor_id, row.get("pm10"), row.get("pm25"),
                  row.get("temperature"), row.get("humidity"), row.get("pressure"),
                  row.get("signal")),
             )
@@ -108,4 +136,24 @@ async def push(request: Request):
             )
 
     await anyio.to_thread.run_sync(_insert)
+    _remember_accepted(device.id, time.time())
     return {"ok": True, "ts": ts}
+
+
+def _note_chip_id(conn, device, sensor_id, ts) -> None:
+    """Учёт esp8266id: справочно, в той же транзакции, что и измерение.
+
+    Для маршрутизации chip_id не используется никогда — человек мог перепаять
+    плату, и отбивать такой push значило бы терять данные из-за смены железа.
+    Поэтому расхождение не отклоняется, а помечается меткой (один раз: она
+    отвечает на вопрос «когда заметили», а не «когда в последний раз»).
+    Записи в devices нет, пока менять нечего.
+    """
+    if not sensor_id:
+        return
+    if device.chip_id is None:
+        conn.execute("UPDATE devices SET chip_id = ? WHERE id = ?",
+                     (sensor_id, device.id))
+    elif sensor_id != device.chip_id and device.chip_id_conflict_at is None:
+        conn.execute("UPDATE devices SET chip_id_conflict_at = ? WHERE id = ?",
+                     (ts, device.id))

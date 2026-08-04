@@ -31,9 +31,13 @@ async def lifespan(_: FastAPI):
     # до старта (ExecStartPre=python -m server.migrate). Здесь только сверка —
     # обслуживать запросы по отставшей схеме хуже, чем не подняться.
     migrate.assert_current()
-    if not auth.PUSH_PASS:
+    # Предупреждаем, только если секрета нет нигде: после перехода на креды
+    # устройства нормальное состояние — пустой TU4KA_PUSH_PASS и хеши в devices,
+    # и ругаться на него значило бы врать в журнал.
+    if not auth.PUSH_PASS and not auth.any_device_secret():
         logging.getLogger("uvicorn.error").warning(
-            "TU4KA_PUSH_PASS не задан — /api/v1/push принимает данные без авторизации")
+            "секрета push нет ни в devices, ни в TU4KA_PUSH_PASS —"
+            " /api/v1/push принимает данные без авторизации")
     yield
 
 

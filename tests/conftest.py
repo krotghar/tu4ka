@@ -3,9 +3,11 @@
 Главная тонкость: db.py и auth.py читают TU4KA_DB / TU4KA_PUSH_USER /
 TU4KA_PUSH_PASS в глобалы на момент импорта модуля. Переопределять переменные
 окружения после импорта бесполезно — подменяем сами глобалы (db.connect() и
-auth.check_push_auth() читают их при каждом вызове, так что monkeypatch работает).
+auth.resolve_push_device() читают их при каждом вызове, так что monkeypatch
+работает).
 """
 
+import hashlib
 import sqlite3
 import time
 
@@ -13,9 +15,24 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server import auth, db, main, migrate
+from server.routes import push as push_routes
 
 PUSH_USER = "tu4ka"
 PUSH_PASS = "test-secret"
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    """Лимитер приёма живёт в модульном словаре, то есть переживает тест.
+
+    Без сброса первый же тест, отправивший push, съедал бы окно у следующих:
+    время в тестах истории заморожено фикстурой frozen_now, и окно само
+    никогда не уезжает.
+    """
+    push_routes._accepted.clear()
+    auth._bridge_warned = False
+    yield
+    push_routes._accepted.clear()
 
 
 @pytest.fixture
@@ -50,6 +67,59 @@ def auth_client(db_path, monkeypatch):
     """Клиент на приложении с включённой basic-авторизацией push."""
     monkeypatch.setattr(auth, "PUSH_USER", PUSH_USER)
     monkeypatch.setattr(auth, "PUSH_PASS", PUSH_PASS)
+    with TestClient(main.app) as c:
+        yield c
+
+
+def sha256(value):
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+@pytest.fixture
+def set_push_secret(db_path):
+    """Кладёт секрет push прямо в devices — путь «БД источник правды».
+
+    Отличие от auth_client: тот оставляет строку устройства без секрета и
+    проверяет мост на переменные окружения.
+    """
+
+    def _set(secret, device_id=1, prev=None, prev_until=None):
+        conn = sqlite3.connect(str(db_path))
+        with conn:
+            conn.execute(
+                "UPDATE devices SET push_secret_sha256 = ?,"
+                " push_secret_prev_sha256 = ?, push_secret_prev_until = ?"
+                " WHERE id = ?",
+                (sha256(secret), sha256(prev) if prev else None, prev_until,
+                 device_id))
+        conn.close()
+
+    return _set
+
+
+@pytest.fixture
+def add_device(db_path):
+    """Заводит второе устройство со своими кредами. Возвращает его id."""
+
+    def _add(slug, push_user, secret, chip_id=None):
+        conn = sqlite3.connect(str(db_path))
+        with conn:
+            cur = conn.execute(
+                "INSERT INTO devices(slug, name, chip_id, push_user,"
+                " push_secret_sha256, created_at) VALUES(?,?,?,?,?,?)",
+                (slug, slug, chip_id, push_user, sha256(secret),
+                 int(time.time())))
+            device_id = cur.lastrowid
+        conn.close()
+        return device_id
+
+    return _add
+
+
+@pytest.fixture
+def device_client(db_path, set_push_secret):
+    """Клиент, где креды устройства заданы в БД, а окружение пустое."""
+    set_push_secret(PUSH_PASS)
     with TestClient(main.app) as c:
         yield c
 
