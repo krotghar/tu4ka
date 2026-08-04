@@ -1,0 +1,8 @@
+[Unit]
+Description=tu4ka socket (beta)
+
+[Socket]
+ListenStream=127.0.0.1:8001
+
+[Install]
+WantedBy=sockets.target

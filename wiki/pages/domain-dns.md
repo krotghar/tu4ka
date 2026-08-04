@@ -13,10 +13,13 @@
 | A | `amqi.am` | `178.160.230.131` | DNS only |
 | A | `www.amqi.am` | `178.160.230.131` | DNS only |
 | A | `push.amqi.am` | `178.160.230.131` | DNS only |
+| A | `beta.amqi.am` | `178.160.230.131` | DNS only |
 
-На момент заведения uvicorn слушает `0.0.0.0:80` и на `Host` не смотрит, поэтому
-все три имени отдают одно и то же приложение. Разведение сайта и приёма появится
-в сессии I1 через `server_name` в nginx; до тех пор `push.amqi.am` — заготовка,
+Имена разведены по `server_name` в nginx (сессия I1): `amqi.am`/`www` — сайт,
+`push.amqi.am` — приём, `beta.amqi.am` — бета-среда. См.
+[nginx-tls-beta](nginx-tls-beta.md).
+
+`push.amqi.am` остаётся заготовкой на случай переезда ingest на другую машину:
 датчик по-прежнему шлёт на голый IP, прошивку не трогали.
 
 ## Зона живёт в Cloudflare, но это не наш аккаунт Cloudflare
@@ -73,13 +76,14 @@ curl -s http://amqi.am/healthz                    # {"ok":true,…}
 парковочная страница name.am, залипшая в кэше до заведения записей. TTL 300,
 проходит само; `+trace` и `@8.8.8.8` показывают правду сразу.
 
-## Осталось (сессия I1)
+## Сессия I1 закрыта
 
-nginx впереди, uvicorn на `127.0.0.1:8000`, `CAP_NET_BIND_SERVICE` из юнита
-убрать, Let's Encrypt на `amqi.am`/`www`, `push.amqi.am` — HTTP:80 **без**
-редиректа на HTTPS (при кросс-схемном редиректе теряется `Authorization`,
-и прошивка может не пойти по 307). См.
-[protocol-airrohr-push](protocol-airrohr-push.md) и [roadmap](roadmap.md).
+nginx впереди, приложения на loopback (`8000` прод, `8001` бета),
+`CAP_NET_BIND_SERVICE` из юнита убран, Let's Encrypt на `amqi.am`/`www` и
+отдельно на `beta.amqi.am`; `push.amqi.am` и голый IP — HTTP:80 **без**
+редиректа на HTTPS. Подробности и обоснования —
+[nginx-tls-beta](nginx-tls-beta.md), формат приёма —
+[protocol-airrohr-push](protocol-airrohr-push.md).
 
 ## Источники
 

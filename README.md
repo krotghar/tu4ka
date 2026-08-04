@@ -13,8 +13,11 @@ sensor.community и madavi.de.
 ```
 
 - Датчик (SDS011 + BME280) каждые 60 секунд отправляет данные на сервер по HTTP.
-- Сервер: VPS Ubuntu 24.04, FastAPI + uvicorn на порту 80.
+- Сервер: VPS Ubuntu 24.04. Снаружи слушает nginx (80/443), FastAPI + uvicorn —
+  на loopback через socket activation.
 - Хранилище: SQLite `/var/lib/tu4ka/tu4ka.db` (WAL).
+- Две среды на одном VPS: прод `https://amqi.am` (ветка `main`) и бета
+  `https://beta.amqi.am` (ветка `dev`).
 
 ## Формат данных от датчика
 
@@ -103,10 +106,11 @@ PM2.5 и PM10; в ответе указывается «определяющий
 - `tests/` — pytest
 - `wiki/` — живая вики проекта, включая свод требований `wiki/pages/requirements.md`
 - `.github/workflows/ci.yml` — тесты + автодеплой
-- `deploy/deploy.sh` — скрипт деплоя
+- `deploy/deploy.sh` — скрипт деплоя (среда — `TU4KA_ENV=prod|beta`)
 - `deploy/remote_setup.sh` — идемпотентная настройка сервера
-- `deploy/tu4ka.service` — systemd-юнит
-- `deploy/requirements.txt` — зависимости
+- `deploy/tu4ka.{service,socket}`, `deploy/tu4ka-beta.{service,socket}` — юниты
+- `deploy/nginx/` — конфиги фронта (сайт, приём, бета)
+- `deploy/requirements.txt` — зависимости, версии запинены целиком
 
 ## Тесты
 
@@ -117,16 +121,20 @@ PM2.5 и PM10; в ответе указывается «определяющий
 
 ## Деплой и эксплуатация
 
-- CI гоняет тесты на push в `main` и в `dev`; деплой — только с `main`.
-- Деплой автоматический: push в `main` → CI (`compileall` + pytest) → тот же
-  `deploy/deploy.sh`. Красные тесты деплой не пускают.
-- Ручной/аварийный прогон: `./deploy/deploy.sh`
+- CI гоняет тесты на push в `main` и в `dev`; **`main` деплоит прод, `dev` —
+  бету**. Красные тесты деплой не пускают.
+- Ручной/аварийный прогон: `./deploy/deploy.sh`, для беты —
+  `TU4KA_ENV=beta ./deploy/deploy.sh`
+- Выкладка не роняет запросы: слушающий сокет держит systemd, рестартуется
+  только `.service`. Проверка — долбилка `curl` во время деплоя, ноль отказов.
 - Доступ: ssh-алиас `tu4ka` (root@178.160.230.131, ключ `~/.ssh/tu4ka`)
-- Логи: `ssh tu4ka journalctl -u tu4ka -f`
-- Код на сервере: `/opt/tu4ka/app/server/` (в `app/` больше ничего нет)
+- Логи: `ssh tu4ka journalctl -u tu4ka -f` (бета — `-u tu4ka-beta`)
+- Код на сервере: `/opt/tu4ka/app/server/` (в `app/` больше ничего нет),
+  бета — `/opt/tu4ka-beta/app/server/`
 - Виртуальное окружение: `/opt/tu4ka/venv`
-- База: `/var/lib/tu4ka/tu4ka.db` — вне `/opt/tu4ka`, деплой её не трогает
-- Креды push: `/etc/tu4ka/env`
+- База: `/var/lib/tu4ka/tu4ka.db` — вне `/opt/tu4ka`, деплой её не трогает.
+  База беты пересевается снимком прода на каждом бета-деплое
+- Креды push: `/etc/tu4ka/env` (у беты свои, `/etc/tu4ka-beta/env`)
 
 ## Настройка датчика
 

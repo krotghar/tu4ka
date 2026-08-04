@@ -1,6 +1,11 @@
 [Unit]
 Description=tu4ka air quality service
-After=network-online.target
+# Слушающий сокет держит systemd, не приложение: тогда `systemctl restart
+# tu4ka.service` не закрывает порт, соединения ждут в очереди ядра и достаются
+# новому процессу. Деплой перестаёт ронять запросы. Рестартовать на выкладке
+# нужно только .service; рестарт .socket пересоздаёт дескриптор и дырку вернёт.
+Requires=tu4ka.socket
+After=tu4ka.socket network-online.target
 Wants=network-online.target
 
 [Service]
@@ -8,11 +13,13 @@ User=tu4ka
 Group=tu4ka
 EnvironmentFile=/etc/tu4ka/env
 WorkingDirectory=/opt/tu4ka/app
-ExecStart=/opt/tu4ka/venv/bin/uvicorn server.main:app --app-dir /opt/tu4ka/app --host 0.0.0.0 --port 80 --workers 1
+# --fd 3 вместо --host/--port: дескриптор приходит от systemd (LISTEN_FDS),
+# первый переданный сокет — всегда 3.
+ExecStart=/opt/tu4ka/venv/bin/uvicorn server.main:app --app-dir /opt/tu4ka/app --fd 3 --workers 1
 Restart=always
 RestartSec=3
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# Порт больше не привилегированный (8000 за nginx), права на bind не нужны.
+CapabilityBoundingSet=
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

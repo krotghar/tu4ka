@@ -1,0 +1,9 @@
+[Unit]
+Description=tu4ka socket (prod)
+
+[Socket]
+# Только loopback: снаружи слушает nginx, приложение — никогда.
+ListenStream=127.0.0.1:8000
+
+[Install]
+WantedBy=sockets.target

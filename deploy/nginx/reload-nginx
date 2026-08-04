@@ -1,0 +1,4 @@
+#!/bin/sh
+# Хук certbot: после продления сертификата подсунуть nginx новый файл.
+# Ставится в /etc/letsencrypt/renewal-hooks/deploy/.
+systemctl reload nginx

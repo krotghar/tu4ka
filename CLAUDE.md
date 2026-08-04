@@ -13,9 +13,14 @@ BME280 (температура, влажность, давление). Заме�
   измерение штатным механизмом «отправка на собственный API» (basic auth).
   Параллельно шлёт на sensor.community и madavi.de.
 - Сервер: VPS `178.160.230.131` (Ubuntu 24.04, 2 ГБ RAM), ssh-алиас `tu4ka`
-  (root, ключ `~/.ssh/tu4ka`). FastAPI + uvicorn на порту 80, systemd-юнит
-  `tu4ka`, SQLite `/var/lib/tu4ka/tu4ka.db` (WAL).
-- Веб-морда: `http://178.160.230.131/`; API: `/api/v1/current`,
+  (root, ключ `~/.ssh/tu4ka`). Снаружи слушает nginx (80/443), приложение —
+  только loopback: юнит `tu4ka` на `127.0.0.1:8000`, SQLite
+  `/var/lib/tu4ka/tu4ka.db` (WAL).
+- **Две среды на одном VPS**: прод (`amqi.am`, ветка `main`) и бета
+  (`beta.amqi.am`, ветка `dev`, юнит `tu4ka-beta` на `:8001`, своя БД, которая
+  пересевается снимком прода на каждом бета-деплое). Всё выводится из
+  `TU4KA_ENV`. См. `wiki/pages/nginx-tls-beta.md`.
+- Веб-морда: `https://amqi.am/`; API: `/api/v1/current`,
   `/api/v1/history?period=24h|7d|30d|12m|all&tz_offset=<мин>`, `/healthz`,
   OpenAPI — `/docs`. Периоды скользящие (последние 24 часа / 7 дней / 30 дней /
   12 месяцев / вся история от первого измерения), а не календарные; `tz_offset` —
@@ -29,20 +34,23 @@ BME280 (температура, влажность, давление). Заме�
 ## Команды
 
 ```bash
-.venv/bin/python -m pytest -q           # тесты (venv из requirements-dev.txt)
-./deploy/deploy.sh                      # ручной деплой (rsync + remote_setup.sh)
-ssh tu4ka journalctl -u tu4ka -f        # логи сервиса
-ssh tu4ka systemctl status tu4ka        # состояние сервиса
-curl http://178.160.230.131/healthz     # быстрая проверка живости
-gh run list --limit 5                   # прогоны CI
+.venv/bin/python -m pytest -q            # тесты (venv из requirements-dev.txt)
+./deploy/deploy.sh                       # ручной деплой прода
+TU4KA_ENV=beta ./deploy/deploy.sh        # ручной деплой беты
+ssh tu4ka journalctl -u tu4ka -f         # логи прода
+ssh tu4ka journalctl -u tu4ka-beta -f    # логи беты
+ssh tu4ka nginx -t                       # конфиг фронта
+curl http://178.160.230.131/healthz      # путь датчика: 200, НЕ 301
+curl https://beta.amqi.am/healthz        # бета
+gh run list --limit 5                    # прогоны CI
 ```
 
 **CI**: `.github/workflows/ci.yml` гоняется на push в `main` и в `dev`. Джоб
-`test` (compileall + pytest) — на обеих ветках; джоб `deploy` гейтится
-`if: github.ref == 'refs/heads/main'`, так что **с `dev` деплоя не будет**.
-На `main` деплой зовёт тот же `deploy/deploy.sh` с
-`TU4KA_HOST=root@178.160.230.131`; красные тесты деплой не пускают.
-`deploy.sh` остаётся для ручного/аварийного прогона.
+`test` (compileall + pytest) — на обеих ветках; джоб `deploy` — тоже, но
+**`main` → прод, `dev` → бета**. Ветка превращается в среду ровно в одном месте
+(`env.TU4KA_ENV` на джобе), и выражение падает в сторону беты: на прод уезжает
+только явный `main`. Красные тесты деплой не пускают. `deploy.sh` остаётся для
+ручного/аварийного прогона.
 
 Линтера нет. Тесты — pytest, лежат в `tests/`, 238 штук.
 
@@ -98,10 +106,19 @@ API, смотрит дашборд в браузере, сверяет с чек
   тема — `prefers-color-scheme`. AQI-герой с вердиктом и рекомендациями,
   «худшие часы» и сводка за 24 часа считаются на клиенте из
   `/api/v1/current` и `/api/v1/history`.
-- `deploy/remote_setup.sh` — идемпотентная настройка сервера; креды push
-  генерируются один раз в `/etc/tu4ka/env` (TU4KA_PUSH_USER/TU4KA_PUSH_PASS).
-- Код на сервере: `/opt/tu4ka/app/server/`, venv `/opt/tu4ka/venv`. Инвариант:
-  `app/` содержит ровно `server/` — за это отвечает rsync-фильтр в `deploy.sh`.
+- `deploy/nginx/` — фронт: `tu4ka.conf` (общий, `default_server` на :80 —
+  путь датчика; ставит только прод), `tu4ka-tls.conf` (сайт), `tu4ka-beta.conf`
+  (бета, noindex). Разбор — [nginx-tls-beta](wiki/pages/nginx-tls-beta.md).
+- `deploy/remote_setup.sh` — идемпотентная настройка сервера, параметризован
+  `TU4KA_ENV`; креды push генерируются один раз в `/etc/<среда>/env`
+  (TU4KA_PUSH_USER/TU4KA_PUSH_PASS). В шапке сверяет `TU4KA_ENV` с собственным
+  путём — иначе копия скрипта из `/opt/tu4ka-beta/` переписала бы прод.
+- Юниты: `tu4ka.{service,socket}` и `tu4ka-beta.{service,socket}`. Слушающий
+  сокет держит systemd, uvicorn берёт его через `--fd 3` — поэтому рестарт
+  `.service` не роняет запросы. На выкладке рестартовать **только `.service`**.
+- Код на сервере: `/opt/<среда>/app/server/`, venv `/opt/<среда>/venv`.
+  Инвариант: `app/` содержит ровно `server/` — за это отвечает rsync-фильтр
+  в `deploy.sh`.
 - `tests/` — pytest, `pythonpath = .` (пакет импортируется как `server.*`).
   `conftest.py` подменяет `db.DB_PATH`/`auth.PUSH_*` через `setattr`, а не
   переменными окружения: модули читают их в глобалы на импорте, так что `setenv`
@@ -116,12 +133,19 @@ API, смотрит дашборд в браузере, сверяет с чек
 Чего не ломать:
 
 - Формат `POST /api/v1/push` — это формат прошивки airRohr, менять нельзя;
-  датчик настроен на путь `/api/v1/push`, порт 80, user `tu4ka`.
+  датчик настроен на голый IP, путь `/api/v1/push`, порт 80, user `tu4ka`.
+- **Путь датчика на `:80` — без редиректа на HTTPS.** Ни на голом IP, ни на
+  `push.amqi.am`. При кросс-схемном редиректе теряется `Authorization`, и на 307
+  прошивка может не пойти; HSTS выдаётся без `includeSubDomains` по той же
+  причине. Прошивка не буферизует и не ретраит — потерянное не вернуть.
 - Пароль push в `/etc/tu4ka/env` должен совпадать с прошитым в датчике
   (веб-конфиг датчика → «Отправка данных на собственный API»).
 - `measurements.raw` хранит исходный JSON — не удалять, это страховка
   для будущих миграций.
-- БД лежит вне `/opt/tu4ka` — деплой с `--delete` её не трогает.
+- БД лежит вне корня среды — деплой с `--delete` её не трогает. Пересев БД идёт
+  **только прод→бета** (`VACUUM INTO`, прод открывается `mode=ro`).
+- certbot только `--webroot`: деплой перезаписывает конфиг nginx каждым
+  прогоном, и правки плагина `--nginx` были бы молча затёрты.
 - Breakpoints AQI в `server/aqi.py` — из авторитетной таблицы AirNow (EPA), редакция
   2024. Не подгонять «по памяти»: при правках сверяться с первоисточником и держать
   самотест (эталонные точки: PM2.5 12.0→56, 35.4→100; PM10 155→101).

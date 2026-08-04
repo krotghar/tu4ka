@@ -77,14 +77,20 @@
 
 | ID | Требование | Как |
 |----|------------|-----|
-| O1 | Push в `main` → CI (`compileall` + pytest) → автодеплой. Красные тесты блокируют деплой. Push в `dev` гоняет тот же джоб `test`, но джоб `deploy` отсечён гейтом по ветке — с `dev` на прод не уезжает ничего | manual |
-| O2 | `deploy/remote_setup.sh` идемпотентен; креды push в `/etc/tu4ka/env` генерируются один раз и при повторном прогоне не перегенерируются | manual |
+| O1 | Push в `main` → CI (`compileall` + pytest) → автодеплой на прод. Push в `dev` → тот же джоб `test`, затем деплой на бету. Красные тесты блокируют оба. На прод с `dev` не уезжает ничего: среда выводится из ref и падает в сторону беты | manual |
+| O2 | `deploy/remote_setup.sh` идемпотентен; креды push в `/etc/<среда>/env` генерируются один раз и при повторном прогоне не перегенерируются | manual |
 | O3 | Пароль push на сервере обязан совпадать с прошитым в датчике — иначе датчик молча перестанет доставлять данные | manual |
-| O4 | БД `/var/lib/tu4ka/tu4ka.db` лежит вне `/opt/tu4ka`, чтобы `rsync --delete` при деплое её не задел | manual |
-| O5 | Сервис: systemd-юнит `tu4ka`, uvicorn на порту 80; `/healthz` отвечает после деплоя | manual |
+| O4 | БД лежит вне корня среды (`/var/lib/tu4ka/tu4ka.db`, `/var/lib/tu4ka-beta/tu4ka.db`), чтобы `rsync --delete` при деплое её не задел | manual |
+| O5 | Снаружи слушает nginx (80 и 443), приложение — только loopback: юнит `tu4ka` на `127.0.0.1:8000`, `tu4ka-beta` на `127.0.0.1:8001`; `/healthz` отвечает после деплоя | manual |
 | O6 | Тесты — pytest в `tests/`, прогон `.venv/bin/python -m pytest -q`, все зелёные. Линтера в проекте нет — не заводить без просьбы | auto |
 | O7 | Вики (`wiki/pages/`, `wiki/index.md`, `wiki/log.md`) обновляется вместе с изменением поведения — иначе она врёт | manual |
-| O8 | Домен `amqi.am`: A-записи `amqi.am`/`www.amqi.am` (сайт) и `push.amqi.am` (приём) ведут на `178.160.230.131`, проксирование Cloudflare выключено на всех трёх. Оранжевое облако ломает Let's Encrypt по HTTP-01 и не должно стоять на пути push. См. [domain-dns](domain-dns.md) | manual |
+| O8 | Домен `amqi.am`: A-записи `amqi.am`/`www.amqi.am` (сайт), `push.amqi.am` (приём) и `beta.amqi.am` (бета) ведут на `178.160.230.131`, проксирование Cloudflare выключено на всех. Оранжевое облако ломает Let's Encrypt по HTTP-01 и не должно стоять на пути push. См. [domain-dns](domain-dns.md) | manual |
+| O9 | Бета — поддомен `beta.amqi.am`, а не префикс пути: `index.html` ходит по корневым путям, и на префиксе бета молча читала бы API прода. Открыта без Basic auth, но отдаёт `X-Robots-Tag: noindex, nofollow`. См. [nginx-tls-beta](nginx-tls-beta.md) | manual |
+| O10 | БД беты пересевается из прода на каждом бета-деплое через `VACUUM INTO` (не `cp` — база в WAL), строго прод→бета. Прод-база при этом открывается `mode=ro` | manual |
+| O11 | `push.amqi.am` и голый IP остаются на HTTP:80 **без редиректа** на HTTPS: при кросс-схемном редиректе теряется `Authorization`, и прошивка может не пойти по 307 | manual |
+| O12 | certbot работает только через `--webroot`; плагин `--nginx` не использовать — деплой перезаписывает конфиг, и правки плагина были бы затёрты. Выпуск загейчен наличием lineage, чтобы не упереться в rate limit LE | manual |
+| O13 | Обновление не роняет запросы: слушающий сокет держит systemd (`tu4ka.socket`), на выкладке рестартуется только `.service`. Проверяется долбилкой `curl` во время деплоя — ноль отказов | manual |
+| O14 | Версии зависимостей в `deploy/requirements.txt` запинены целиком, включая транзитивные: прод, бета и CI ставят одно и то же. Апгрейд — отдельным осознанным коммитом через бету | manual |
 
 ## Источники
 
@@ -93,6 +99,7 @@
   [history-buckets](history-buckets.md), [aqi-nowcast](aqi-nowcast.md),
   [dashboard-metric-selector](dashboard-metric-selector.md),
   [frontend-redesign](frontend-redesign.md), [deploy-cicd](deploy-cicd.md),
+  [nginx-tls-beta](nginx-tls-beta.md), [domain-dns](domain-dns.md),
   [roadmap](roadmap.md);
 - код: пакет `server/` (`main.py`, `db.py`, `auth.py`, `history.py`, `routes/`),
   `server/aqi.py`, `server/static/index.html`, `tests/`.

@@ -1,0 +1,28 @@
+[Unit]
+Description=tu4ka air quality service (beta)
+# Дубль прод-юнита с путями беты — намеренно, а не шаблон tu4ka@.service:
+# переименование прод-юнита сломало бы `systemctl status tu4ka` во всей
+# документации, а sed-рендер прятал бы текст юнита от ревью.
+Requires=tu4ka-beta.socket
+After=tu4ka-beta.socket network-online.target
+Wants=network-online.target
+
+[Service]
+# Тот же системный юзер, что и у прода: изоляция сред идёт по путям и
+# ReadWritePaths, отдельный аккаунт тут ничего не добавил бы.
+User=tu4ka
+Group=tu4ka
+EnvironmentFile=/etc/tu4ka-beta/env
+WorkingDirectory=/opt/tu4ka-beta/app
+ExecStart=/opt/tu4ka-beta/venv/bin/uvicorn server.main:app --app-dir /opt/tu4ka-beta/app --fd 3 --workers 1
+Restart=always
+RestartSec=3
+CapabilityBoundingSet=
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tu4ka-beta
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
