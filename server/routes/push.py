@@ -29,6 +29,11 @@ FIELD_MAP = {
 
 MAX_PUSH_BODY = 64 * 1024  # реальный push прошивки ~500 байт
 
+# Пока устройство одно и креды общие. Маршрутизация по устройству из кредов —
+# следующая сессия; здесь константа, чтобы схема с device_id NOT NULL работала,
+# а поведение приёма не изменилось ни на байт.
+DEVICE_ID = 1
+
 
 @router.post("/api/v1/push")
 async def push(request: Request):
@@ -79,12 +84,27 @@ async def push(request: Request):
 
     def _insert():  # не блокируем event loop, если БД под локом
         with closing(db.connect()) as conn, conn:
-            conn.execute(
-                "INSERT INTO measurements(ts, sensor_id, pm10, pm25, temperature,"
-                " humidity, pressure, signal, raw) VALUES(?,?,?,?,?,?,?,?,?)",
-                (ts, sensor_id, row.get("pm10"), row.get("pm25"),
+            # ON CONFLICT, а не голый INSERT: idx_meas_dev_ts уникален по
+            # (device_id, ts), и второй пуш в ту же секунду иначе вернул бы
+            # прошивке 500. Она не переспрашивает — пусть поздний пуш
+            # перезапишет ранний, чем потеряется вместе с ответом.
+            cur = conn.execute(
+                "INSERT INTO measurements(device_id, ts, sensor_id, pm10, pm25,"
+                " temperature, humidity, pressure, signal) VALUES(?,?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(device_id, ts) DO UPDATE SET"
+                " sensor_id=excluded.sensor_id, pm10=excluded.pm10,"
+                " pm25=excluded.pm25, temperature=excluded.temperature,"
+                " humidity=excluded.humidity, pressure=excluded.pressure,"
+                " signal=excluded.signal RETURNING id",
+                (DEVICE_ID, ts, sensor_id, row.get("pm10"), row.get("pm25"),
                  row.get("temperature"), row.get("humidity"), row.get("pressure"),
-                 row.get("signal"), body.decode("utf-8", "replace")),
+                 row.get("signal")),
+            )
+            measurement_id = cur.fetchone()[0]
+            conn.execute(
+                "INSERT INTO measurements_raw(measurement_id, raw) VALUES(?,?)"
+                " ON CONFLICT(measurement_id) DO UPDATE SET raw=excluded.raw",
+                (measurement_id, body.decode("utf-8", "replace")),
             )
 
     await anyio.to_thread.run_sync(_insert)

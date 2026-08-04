@@ -12,7 +12,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from server import auth, db, main
+from server import auth, db, main, migrate
 
 PUSH_USER = "tu4ka"
 PUSH_PASS = "test-secret"
@@ -31,6 +31,9 @@ def db_path(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", str(path))
     monkeypatch.setattr(auth, "PUSH_USER", "")
     monkeypatch.setattr(auth, "PUSH_PASS", "")
+    # Схему создаёт раннер миграций, а не lifespan: приложение теперь только
+    # сверяет версию и на пустой базе отказалось бы стартовать.
+    migrate.run()
     return path
 
 
@@ -57,14 +60,16 @@ def insert_measurement(db_path, client):
     где нужны точки в прошлом (через POST /push ts всегда = now)."""
 
     def _insert(ts=None, pm25=None, pm10=None, temperature=None,
-                humidity=None, pressure=None, sensor_id="2998975"):
+                humidity=None, pressure=None, sensor_id="2998975", device_id=1):
         ts = int(time.time()) if ts is None else int(ts)
         conn = sqlite3.connect(str(db_path))
         with conn:
             conn.execute(
-                "INSERT INTO measurements(ts, sensor_id, pm10, pm25, temperature,"
-                " humidity, pressure, signal, raw) VALUES(?,?,?,?,?,?,?,?,?)",
-                (ts, sensor_id, pm10, pm25, temperature, humidity, pressure, None, "{}"),
+                "INSERT INTO measurements(device_id, ts, sensor_id, pm10, pm25,"
+                " temperature, humidity, pressure, signal)"
+                " VALUES(?,?,?,?,?,?,?,?,?)",
+                (device_id, ts, sensor_id, pm10, pm25, temperature, humidity,
+                 pressure, None),
             )
         conn.close()
         return ts

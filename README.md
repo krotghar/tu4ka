@@ -93,11 +93,13 @@ PM2.5 и PM10; в ответе указывается «определяющий
 
 - `server/` — python-пакет приложения (`uvicorn server.main:app`):
   - `main.py` — сборка приложения FastAPI
-  - `db.py` — SQLite: подключение, прагмы, схема
+  - `db.py` — SQLite: подключение и прагмы
+  - `migrations.py`, `migrate.py` — версии схемы на `PRAGMA user_version`
   - `auth.py` — учётные данные push
   - `history.py` — скользящие окна и корзины `/history`
   - `routes/push.py`, `routes/api.py` — эндпоинты
-  - `quality.py`, `geo.py` — каркасы под качество данных и координаты
+  - `geo.py` — HMAC-смещение публичных координат
+  - `quality.py` — каркас под качество данных
 - `server/aqi.py` — расчёт US EPA AQI (breakpoints 2024 + NowCast), чистые функции
 - `server/static/index.html` — веб-морда одной страницей: свой SVG для графиков,
   без сборки и внешних зависимостей
@@ -117,6 +119,13 @@ PM2.5 и PM10; в ответе указывается «определяющий
 ```bash
 .venv/bin/python -m pytest -q      # venv из requirements-dev.txt
 .venv/bin/python server/aqi.py     # самотест AQI по эталонным точкам EPA
+```
+
+Схему приложение само не создаёт: перед первым локальным запуском на свежей
+базе нужно прогнать миграции, иначе сервер откажется стартовать.
+
+```bash
+.venv/bin/python -m server.migrate
 ```
 
 ## Деплой и эксплуатация

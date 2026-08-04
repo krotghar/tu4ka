@@ -4,8 +4,8 @@
 хранит историю в SQLite и отдаёт REST API + веб-морду.
 
 Здесь только сборка приложения: сам код разнесён по модулям пакета —
-db.py (SQLite), auth.py (креды push), history.py (окна и корзины),
-aqi.py (US EPA AQI), routes/ (эндпоинты).
+db.py (SQLite), migrate.py/migrations.py (версии схемы), auth.py (креды push),
+history.py (окна и корзины), aqi.py (US EPA AQI), routes/ (эндпоинты).
 """
 
 import logging
@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import auth, db
+from . import auth, migrate
 from .routes import api as api_routes
 from .routes import public as public_routes
 from .routes import push as push_routes
@@ -27,7 +27,10 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    db.init_schema()
+    # Схему приложение не создаёт и не мигрирует: это делает отдельный процесс
+    # до старта (ExecStartPre=python -m server.migrate). Здесь только сверка —
+    # обслуживать запросы по отставшей схеме хуже, чем не подняться.
+    migrate.assert_current()
     if not auth.PUSH_PASS:
         logging.getLogger("uvicorn.error").warning(
             "TU4KA_PUSH_PASS не задан — /api/v1/push принимает данные без авторизации")

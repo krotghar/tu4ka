@@ -14,6 +14,10 @@ User=tu4ka
 Group=tu4ka
 EnvironmentFile=/etc/tu4ka-beta/env
 WorkingDirectory=/opt/tu4ka-beta/app
+# Как у прода: миграции до старта uvicorn. На бете это ещё и репетиция —
+# база пересевается снимком прода на каждом деплое, VACUUM INTO сохраняет
+# user_version=0, значит цепочка прогоняется с нуля на боевых данных.
+ExecStartPre=/opt/tu4ka-beta/venv/bin/python -m server.migrate
 ExecStart=/opt/tu4ka-beta/venv/bin/uvicorn server.main:app --app-dir /opt/tu4ka-beta/app --fd 3 --workers 1
 Restart=always
 RestartSec=3

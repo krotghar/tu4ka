@@ -14,11 +14,13 @@
 | Модуль | Ответственность |
 |---|---|
 | `main.py` | Только сборка: `FastAPI()`, `lifespan`, CORS, `mount("/static")`, `include_router()`, `GET /` |
-| `db.py` | `DB_PATH`, `SCHEMA`, `connect()`, `init_schema()` |
+| `db.py` | `DB_PATH`, `connect()` и прагмы. Схемой **не** владеет |
+| `migrations.py`, `migrate.py` | Версии схемы и раннер — [db-schema-migrations](db-schema-migrations.md) |
 | `auth.py` | Креды push: `PUSH_USER`, `PUSH_PASS`, `check_push_auth()` |
 | `history.py` | `PERIODS`, `MAX_TZ_OFFSET`, `period_window()`, `build_history()` |
 | `aqi.py` | US EPA AQI — как был, чистые функции |
-| `quality.py`, `geo.py` | Каркасы: качество данных и смещение публичных координат |
+| `geo.py` | `public_coords()` — HMAC-смещение публичных координат |
+| `quality.py` | Каркас: качество данных |
 | `routes/push.py` | `FIELD_MAP`, `MAX_PUSH_BODY`, `POST /api/v1/push` |
 | `routes/api.py` | `_nowcast_aqi()`, `/api/v1/current`, `/api/v1/history`, `/healthz` |
 
@@ -93,9 +95,11 @@ rsync -az --delete --delete-excluded \
 ## Что осталось за рамками
 
 Разбиение — чистый рефакторинг: поведение не менялось, `/openapi.json` совпадает
-с версией до разбиения байт в байт. Создание схемы по-прежнему в `lifespan`
-(переезд в раннер миграций — следующий шаг), `quality.py` и `geo.py` пусты,
-`server/static/index.html` не тронут.
+с версией до разбиения байт в байт. `server/static/index.html` не тронут.
+
+Дальнейшим шагом схема уехала из `lifespan` в раннер миграций
+(`migrate.py`/`migrations.py`, см. [db-schema-migrations](db-schema-migrations.md)),
+и `geo.py` наполнился. Пустым каркасом остаётся только `quality.py`.
 
 См. также: [deploy-cicd](deploy-cicd.md), [history-buckets](history-buckets.md),
 [protocol-airrohr-push](protocol-airrohr-push.md), [roadmap](roadmap.md).

@@ -8,6 +8,7 @@ PUSH_USER/PUSH_PASS живут в tests/conftest.py — здесь только 
 """
 
 import base64
+import sqlite3
 import time
 from datetime import datetime, timezone
 
@@ -227,6 +228,38 @@ def test_push_sensor_id_empty_when_unknown(client):
     r = client.post("/api/v1/push", json={"sensordatavalues": []})
     assert r.status_code == 200, r.text
     assert client.get("/api/v1/current").json()["sensor_id"] == ""
+
+
+def test_push_writes_device_id_and_splits_raw(client, db_path):
+    r = client.post("/api/v1/push", json=_push_body(SDS_P2=7.1))
+    assert r.status_code == 200, r.text
+
+    conn = sqlite3.connect(str(db_path))
+    row = conn.execute(
+        "SELECT m.device_id, r.raw FROM measurements m"
+        " JOIN measurements_raw r ON r.measurement_id = m.id").fetchone()
+    conn.close()
+    assert row[0] == 1
+    # raw — исходное тело запроса целиком, страховка для будущих миграций
+    assert '"SDS_P2"' in row[1]
+
+
+def test_second_push_in_the_same_second_overwrites_instead_of_failing(
+        client, db_path, frozen_now):
+    """Уникальный индекс (device_id, ts) не должен возвращать прошивке 500.
+
+    Она не буферизует и не переспрашивает: ошибка ответа — это безвозвратно
+    потерянное измерение. Поздний пуш перезаписывает ранний.
+    """
+    assert client.post("/api/v1/push", json=_push_body(SDS_P2=7.1)).status_code == 200
+    assert client.post("/api/v1/push", json=_push_body(SDS_P2=9.9)).status_code == 200
+
+    conn = sqlite3.connect(str(db_path))
+    rows = conn.execute("SELECT pm25 FROM measurements").fetchall()
+    raws = conn.execute("SELECT count(*) FROM measurements_raw").fetchall()
+    conn.close()
+    assert rows == [(9.9,)]
+    assert raws == [(1,)]
 
 
 def test_push_returns_server_timestamp(client, frozen_now):

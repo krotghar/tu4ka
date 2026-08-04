@@ -13,6 +13,10 @@ User=tu4ka
 Group=tu4ka
 EnvironmentFile=/etc/tu4ka/env
 WorkingDirectory=/opt/tu4ka/app
+# Миграции схемы — отдельным процессом до старта uvicorn, а не из lifespan:
+# перестроение таблицы не должно идти под живым трафиком. Упадёт — сервис не
+# поднимется, и это правильно: работать по отставшей схеме хуже.
+ExecStartPre=/opt/tu4ka/venv/bin/python -m server.migrate
 # --fd 3 вместо --host/--port: дескриптор приходит от systemd (LISTEN_FDS),
 # первый переданный сокет — всегда 3.
 ExecStart=/opt/tu4ka/venv/bin/uvicorn server.main:app --app-dir /opt/tu4ka/app --fd 3 --workers 1
