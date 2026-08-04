@@ -91,13 +91,19 @@ if [ ! -f "$ETC/env" ]; then
 fi
 
 # --- юниты ------------------------------------------------------------------
-# Переезд с :80 за nginx случается ровно один раз. Запоминаем факт до
-# перезаписи юнита: только на этом прогоне уместен автооткат.
+# Переезд с :80 за nginx случается ровно один раз; только на этом прогоне
+# уместен автооткат. Признак — неподнятый сокет, а не текст живого юнита:
+# прогон может оборваться уже после перезаписи юнита (так и вышло на первой
+# попытке), и тогда проверка по `--port 80` на повторе дала бы CUTOVER=0,
+# сняв страховку ровно там, где она нужнее всего.
 CUTOVER=0
-if [ "$ENV" = prod ] && grep -q -- '--port 80' /etc/systemd/system/$NAME.service 2>/dev/null; then
+if [ "$ENV" = prod ] && ! systemctl is-active --quiet "$NAME.socket"; then
     CUTOVER=1
-    cp /etc/systemd/system/$NAME.service /etc/systemd/system/$NAME.service.prev
-    echo "== переезд с :80 за nginx; прежний юнит сохранён в $NAME.service.prev"
+    # Не перезаписывать: на повторном прогоне живой юнит — уже новый, и копия
+    # затёрла бы настоящий оригинал.
+    [ -f /etc/systemd/system/$NAME.service.prev ] || \
+        cp /etc/systemd/system/$NAME.service /etc/systemd/system/$NAME.service.prev
+    echo "== переезд за nginx; прежний юнит сохранён в $NAME.service.prev"
 fi
 
 cp "$ROOT/deploy/$NAME.service" /etc/systemd/system/$NAME.service
@@ -105,10 +111,21 @@ cp "$ROOT/deploy/$NAME.socket"  /etc/systemd/system/$NAME.socket
 systemctl daemon-reload
 systemctl enable "$NAME.socket" >/dev/null 2>&1
 systemctl enable "$NAME" >/dev/null 2>&1
+
 # Сокет поднимаем один раз и дальше не трогаем: слушающий дескриптор держит
 # systemd, поэтому рестарт .service не закрывает порт — соединения ждут
 # в очереди ядра. Рестарт .socket вернул бы дырку.
-systemctl start "$NAME.socket"
+#
+# Но поднять сокет можно только при остановленном сервисе: systemd отвечает
+# «Socket service already active, refusing», если .service, который сокет
+# обслуживает, уже работает. На переезде это неизбежно — старый процесс держит
+# и :80, и себя, — поэтому там сервис сначала останавливаем. На обычном деплое
+# сокет уже активен, эта ветка не выполняется, и сервис не останавливается: в
+# этом весь смысл.
+if ! systemctl is-active --quiet "$NAME.socket"; then
+    systemctl stop "$NAME" 2>/dev/null || true
+    systemctl start "$NAME.socket"
+fi
 
 # --- бета: пересев БД из прода ---------------------------------------------
 if [ "$ENV" = beta ]; then
@@ -133,7 +150,9 @@ PY
     chmod 640 "$DB_DIR/tu4ka.db"
 fi
 
-systemctl restart "$NAME"
+# `|| true`, потому что дальше идёт проверка живости с автооткатом: под `set -e`
+# упавший restart оборвал бы скрипт до неё и оставил прод в полупереехавшем виде.
+systemctl restart "$NAME" || true
 
 # --- nginx: старт/перезагрузка ---------------------------------------------
 systemctl enable nginx >/dev/null 2>&1
