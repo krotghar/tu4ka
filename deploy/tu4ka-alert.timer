@@ -1,0 +1,11 @@
+[Unit]
+Description=tu4ka: тишина датчика и heartbeat
+
+[Timer]
+# Раз в 5 минут: датчик шлёт раз в 60 с, порог тишины — час, так что частить
+# незачем, а реже — heartbeat перестанет быть heartbeat'ом.
+OnBootSec=3min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,18 @@
+[Unit]
+Description=tu4ka: тишина датчика и heartbeat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=tu4ka
+Group=tu4ka
+EnvironmentFile=/etc/tu4ka/env
+ExecStart=/opt/tu4ka/venv/bin/python /opt/tu4ka/deploy/alert.py
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+# Состояние алерта (alert-state.json) лежит рядом с базой; сама база читается
+# mode=ro.
+ReadWritePaths=/var/lib/tu4ka
+PrivateTmp=true

@@ -1,0 +1,24 @@
+[Unit]
+Description=tu4ka: ежедневный бэкап базы
+# Офсайт-загрузка ходит в сеть; без этого первый прогон после ребута мог бы
+# упереться в неподнятый интерфейс.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=tu4ka
+Group=tu4ka
+EnvironmentFile=/etc/tu4ka/env
+ExecStart=/opt/tu4ka/deploy/backup.sh
+# Фоновая задача на машине, которая в это же время принимает измерения:
+# уступаем и процессор, и диск. Бэкапу спешить некуда.
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+# Единственное, куда скрипт пишет. Базу он читает mode=ro и по конструкции
+# изменить не может.
+ReadWritePaths=/var/backups/tu4ka
+PrivateTmp=true

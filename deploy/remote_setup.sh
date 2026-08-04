@@ -111,6 +111,26 @@ else
     chmod 600 "$ETC/env"
 fi
 
+# --- ключи эксплуатации (I2) ------------------------------------------------
+# Заводим ПУСТЫМИ и только если строки ещё нет. Значения вписывает человек
+# руками: токен бота, ping-URL и ключ хранилища — не то, что можно сгенерить
+# на сервере.
+#
+# Пустое значение = функция выключена, скрипт логирует это и выходит с нулём.
+# Так деплой не падает из-за незаполненного токена, а включение не требует
+# выкладки — достаточно правки файла.
+#
+# Только прод: бета-ветка выше переписывает свой env целиком на каждом прогоне,
+# так что любые ключи там были бы стёрты, — и алерты с бэкапами бете не нужны
+# по существу (см. ниже).
+if [ "$ENV" = prod ]; then
+    for key in TU4KA_TG_BOT_TOKEN TU4KA_TG_CHAT_ID TU4KA_HC_URL \
+               TU4KA_S3_ENDPOINT TU4KA_S3_BUCKET TU4KA_S3_REGION \
+               TU4KA_S3_KEY TU4KA_S3_SECRET; do
+        grep -q "^$key=" "$ETC/env" || printf '%s=\n' "$key" >> "$ETC/env"
+    done
+fi
+
 # --- юниты ------------------------------------------------------------------
 # Переезд с :80 за nginx случается ровно один раз; только на этом прогоне
 # уместен автооткат. Признак — неподнятый сокет, а не текст живого юнита:
@@ -244,6 +264,28 @@ if [ -d "/etc/letsencrypt/live/$CERT_NAME" ]; then
         exit 1
     fi
     systemctl enable --now certbot.timer >/dev/null 2>&1 || true
+fi
+
+# --- эксплуатация: бэкап и алерты (только прод) -----------------------------
+# Бете ни то, ни другое не ставится, и это не экономия, а осознанный выбор:
+#
+#   * бэкапить нечего — база беты пересевается снимком прода на каждом её
+#     деплое, своих данных у неё нет по конструкции;
+#   * алерт на бете вредит. Данные там живые только пока работает зеркало пуша
+#     в nginx; сломается зеркало — бета замолчит при совершенно здоровом проде
+#     и пришлёт ложную тревогу. Тревога, которой нельзя верить, хуже её
+#     отсутствия: на неё перестают реагировать.
+if [ "$ENV" = prod ]; then
+    mkdir -p /var/backups/tu4ka
+    chown tu4ka:tu4ka /var/backups/tu4ka
+    chmod 750 /var/backups/tu4ka
+    for unit in tu4ka-backup.service tu4ka-backup.timer \
+                tu4ka-alert.service tu4ka-alert.timer; do
+        cp "$ROOT/deploy/$unit" "/etc/systemd/system/$unit"
+    done
+    systemctl daemon-reload
+    systemctl enable --now tu4ka-backup.timer tu4ka-alert.timer >/dev/null 2>&1
+    echo "== таймеры: $(systemctl is-active tu4ka-backup.timer) / $(systemctl is-active tu4ka-alert.timer)"
 fi
 
 sleep 1
